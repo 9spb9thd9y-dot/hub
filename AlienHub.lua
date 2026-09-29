@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.9.5 — quick actions, mobile-first)
+--  ALIEN HUB | Rayfield UI (v3.9.7 — sea beasts, config persistence)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -107,14 +107,14 @@ do -- NETWORK CACHE
 end
 
 -- ============================================================
---  WINDOW (config saving enabled)
+--  WINDOW (rayfield saver OFF — custom persistence replaces it)
 -- ============================================================
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.9.5 | initializing modules...",
+    LoadingSubtitle = "v3.9.7 | initializing modules...",
     ConfigurationSaving = {
-        Enabled = true,
+        Enabled = false,
         FolderName = "AlienHub",
         FileName = "Config"
     },
@@ -493,13 +493,15 @@ if Hub.Validator then
 end
 
 -- ============================================================
---  FLY (mobile: joystick + hold ▲▼ buttons | PC: WASD/Space/Ctrl)
+--  FLY (mobile: joystick + hold ▲▼ | PC: WASD/Space/Ctrl)
+--  cooperates with pursuit (releases physics when chasing)
 -- ============================================================
 do
     local FlyConnection = nil
     local bv, bg = nil, nil
     local flyVertical = 0
     local FlyVertGui = nil
+    local FlyWanted = false
 
     local function CreateFlyButtons()
         if FlyVertGui then return end
@@ -605,29 +607,60 @@ do
         end
     end
 
+    function Hub.AttachFlyPhysics()
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChild("Humanoid")
+        if not hrp or not hum then return end
+        if not bv or not bv.Parent then
+            bv = Instance.new("BodyVelocity")
+            bv.Name = "FlyVelocity"
+            bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+            bv.Velocity = Vector3.new(0, 0, 0)
+            bv.Parent = hrp
+            bg = Instance.new("BodyGyro")
+            bg.Name = "FlyGyro"
+            bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+            bg.P = 9e4
+            bg.CFrame = hrp.CFrame
+            bg.Parent = hrp
+            hum.PlatformStand = true
+        end
+    end
+
+    function Hub.ReleaseFlyPhysics()
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local oldBv = hrp:FindFirstChild("FlyVelocity")
+            local oldBg = hrp:FindFirstChild("FlyGyro")
+            if oldBv then oldBv:Destroy() end
+            if oldBg then oldBg:Destroy() end
+        end
+        bv, bg = nil, nil
+    end
+
     local function StopFly()
+        FlyWanted = false
         if FlyConnection then FlyConnection:Disconnect(); FlyConnection = nil end
+        Hub.ReleaseFlyPhysics()
         local char = player.Character
         if char then
             local hum = char:FindFirstChild("Humanoid")
             if hum then hum.PlatformStand = false end
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local oldBv = hrp:FindFirstChild("FlyVelocity")
-                local oldBg = hrp:FindFirstChild("FlyGyro")
-                if oldBv then oldBv:Destroy() end
-                if oldBg then oldBg:Destroy() end
-            end
         end
-        bv, bg = nil, nil
         SetFlyButtons(false)
     end
 
     local function StartFly()
-        StopFly()
+        FlyWanted = true
         SetFlyButtons(true)
+        if Hub.PursuitActive and Hub.PursuitActive() then return end
+
         FlyConnection = RunService.RenderStepped:Connect(function(dt)
             if not Config.Fly then StopFly() return end
+            if Hub.PursuitActive and Hub.PursuitActive() then return end
+
             local char = player.Character
             if not char then return end
             local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -635,20 +668,7 @@ do
             if not hrp or not hum then return end
 
             if not bv or not bv.Parent then
-                bv = Instance.new("BodyVelocity")
-                bv.Name = "FlyVelocity"
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.new(0, 0, 0)
-                bv.Parent = hrp
-
-                bg = Instance.new("BodyGyro")
-                bg.Name = "FlyGyro"
-                bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-                bg.P = 9e4
-                bg.CFrame = hrp.CFrame
-                bg.Parent = hrp
-
-                hum.PlatformStand = true
+                Hub.AttachFlyPhysics()
             end
 
             local cam = workspace.CurrentCamera
@@ -683,17 +703,22 @@ do
                 move = move.Unit
             end
 
-            bv.Velocity = move * Hub.TweenSpeedVal
-            bg.CFrame = cam.CFrame
+            if bv then
+                bv.Velocity = move * Hub.TweenSpeedVal
+            end
+            if bg then
+                bg.CFrame = cam.CFrame
+            end
         end)
     end
 
     Hub.StartFly = StartFly
     Hub.StopFly = StopFly
+    Hub.IsFlyWanted = function() return FlyWanted end
 
     player.CharacterAdded:Connect(function()
         task.wait(0.5)
-        if Config.Fly then StartFly() end
+        if Config.Fly and FlyWanted then StartFly() end
     end)
 end
 
@@ -942,7 +967,7 @@ do
 end
 
 -- ============================================================
---  DRAGON GUN M1 (v3.7 proven core)
+--  DRAGON GUN M1 (v3.9.7 — sea beasts restored)
 -- ============================================================
 do
     local ShootGunEvent, Validator2, ShootFunction = nil, nil, nil
@@ -1023,22 +1048,12 @@ do
         return math.floor(v9 / v4 * 16777215), v7
     end
 
+    -- v3.9.7: players → sea beasts → mobs (priority from source)
     local function GetClosestDragonTarget(myHRP)
         local closest, dist = nil, Hub.DragonGunRange
         local myPos = myHRP.Position
 
-        local enemies = workspace:FindFirstChild("Enemies")
-        if enemies then
-            for _, enemy in pairs(enemies:GetChildren()) do
-                local hum = enemy:FindFirstChildOfClass("Humanoid")
-                local r = enemy:FindFirstChild("HumanoidRootPart")
-                if hum and hum.Health > 0 and r then
-                    local d = (r.Position - myPos).Magnitude
-                    if d < dist then dist = d; closest = r end
-                end
-            end
-        end
-
+        -- 1) players first (filtered)
         for _, p in ipairs(Players:GetPlayers()) do
             if not Hub.ShouldSkipPlayerTarget(p) and p.Character then
                 local hum = p.Character:FindFirstChild("Humanoid")
@@ -1046,6 +1061,36 @@ do
                 if hum and hum.Health > 0 and r then
                     local d = (r.Position - myPos).Magnitude
                     if d < dist then dist = d; closest = r end
+                end
+            end
+        end
+
+        -- 2) sea beasts second (Health ValueBase — no Humanoid)
+        if not closest then
+            local seaBeasts = workspace:FindFirstChild("SeaBeasts")
+            if seaBeasts then
+                for _, beast in ipairs(seaBeasts:GetChildren()) do
+                    local r = beast:FindFirstChild("HumanoidRootPart")
+                    local health = beast:FindFirstChild("Health")
+                    if r and health and health:IsA("ValueBase") and health.Value > 0 then
+                        local d = (r.Position - myPos).Magnitude
+                        if d < dist then dist = d; closest = r end
+                    end
+                end
+            end
+        end
+
+        -- 3) mobs last
+        if not closest then
+            local enemies = workspace:FindFirstChild("Enemies")
+            if enemies then
+                for _, enemy in pairs(enemies:GetChildren()) do
+                    local hum = enemy:FindFirstChildOfClass("Humanoid")
+                    local r = enemy:FindFirstChild("HumanoidRootPart")
+                    if hum and hum.Health > 0 and r then
+                        local d = (r.Position - myPos).Magnitude
+                        if d < dist then dist = d; closest = r end
+                    end
                 end
             end
         end
@@ -1477,18 +1522,31 @@ do
 end
 
 -- ============================================================
---  MOVEMENT | SMOOTH PURSUIT
+--  MOVEMENT | SMOOTH PURSUIT (fly-aware, death-proof)
 -- ============================================================
 do
     local TweenConnection = nil
     local SnapArmed = true
+    local PursuitRunning = false
+
+    Hub.PursuitActive = function()
+        return PursuitRunning
+    end
 
     local function StopTween()
+        PursuitRunning = false
         if TweenConnection then TweenConnection:Disconnect(); TweenConnection = nil end
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.AssemblyLinearVelocity = Vector3.zero
+        if Config.Fly and Hub.IsFlyWanted and Hub.IsFlyWanted() then
+            Hub.AttachFlyPhysics()
+            local char = player.Character
+            local hum = char and char:FindFirstChild("Humanoid")
+            if hum then hum.PlatformStand = true end
+        else
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.AssemblyLinearVelocity = Vector3.zero
+            end
         end
     end
 
@@ -1515,9 +1573,15 @@ do
 
     local function StartTween()
         StopTween()
+        PursuitRunning = true
         SnapArmed = true
+        Hub.ReleaseFlyPhysics()
+
         TweenConnection = RunService.Heartbeat:Connect(function(dt)
-            if not (Config.TweenToPlayer or Config.TweenToNearest) then StopTween() return end
+            if not (Config.TweenToPlayer or Config.TweenToNearest) then
+                StopTween()
+                return
+            end
             dt = math.min(dt, 0.1)
 
             local myChar = player.Character
@@ -1577,6 +1641,13 @@ do
 
     Hub.StartTween = StartTween
     Hub.StopTween = StopTween
+
+    player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        if PursuitRunning then
+            StartTween()
+        end
+    end)
 end
 
 -- ============================================================
@@ -1969,7 +2040,6 @@ do
             return false
         end
 
-        -- PLAYER LIST SYSTEM — silent aim hook
         if Hub.ListMode == "Blacklist" and Hub.IsListed(targetplayer.Name) then
             return false
         elseif Hub.ListMode == "Whitelist" and not Hub.IsListed(targetplayer.Name) then
@@ -2413,7 +2483,7 @@ do
 end
 
 -- ============================================================
---  MOBILE | FLOATING HUB TOGGLE (tap to hide/show UI)
+--  MOBILE | FLOATING HUB TOGGLE
 -- ============================================================
 do
     local ToggleGui = Instance.new("ScreenGui")
@@ -2508,7 +2578,7 @@ do
 end
 
 -- ============================================================
---  MOBILE | QUICK ACTION PANEL (floating keybind-style toggles)
+--  MOBILE | QUICK ACTIONS (collapsed pill → dropdown stack)
 -- ============================================================
 do
     if UserInputService.TouchEnabled then
@@ -2525,10 +2595,10 @@ do
 
         local panel = Instance.new("Frame")
         panel.Name = "Panel"
-        panel.Size = UDim2.new(0, 96, 0, 260)
-        panel.Position = UDim2.new(1, -110, 0.25, 0)
+        panel.Size = UDim2.new(0, 92, 0, 30)
+        panel.Position = UDim2.new(1, -102, 0.22, 0)
         panel.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
-        panel.BackgroundTransparency = 0.35
+        panel.BackgroundTransparency = 0.3
         panel.BorderSizePixel = 0
         panel.Active = true
         panel.Parent = PanelGui
@@ -2542,14 +2612,22 @@ do
         ps.Transparency = 0.4
         ps.Parent = panel
 
-        local layout = Instance.new("UIListLayout")
-        layout.Padding = UDim.new(0, 4)
-        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        layout.VerticalAlignment = Enum.VerticalAlignment.Center
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Parent = panel
+        local rows = Instance.new("Frame")
+        rows.Name = "Rows"
+        rows.Size = UDim2.new(1, 0, 0, 0)
+        rows.Position = UDim2.new(0, 0, 1, 4)
+        rows.BackgroundTransparency = 1
+        rows.Visible = false
+        rows.Parent = panel
 
-        local collapsed = false
+        local rlayout = Instance.new("UIListLayout")
+        rlayout.Padding = UDim.new(0, 4)
+        rlayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        rlayout.SortOrder = Enum.SortOrder.LayoutOrder
+        rlayout.Parent = rows
+
+        local expanded = false
+        local openCount = 0
 
         local function SetRayfieldFlag(flag, value)
             pcall(function()
@@ -2560,20 +2638,19 @@ do
             end)
         end
 
-        local function makeToggle(order, label, getter, setter, flag)
+        local function makeToggle(label, getter, setter, flag)
             local b = Instance.new("TextButton")
-            b.Size = UDim2.new(0, 88, 0, 26)
+            b.Size = UDim2.new(0, 92, 0, 28)
             b.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
             b.Text = label .. ": ?"
             b.TextColor3 = Color3.fromRGB(255, 255, 255)
-            b.TextSize = 11
+            b.TextSize = 12
             b.Font = Enum.Font.GothamBold
             b.AutoButtonColor = false
             b.BorderSizePixel = 0
-            b.LayoutOrder = order
-            b.Parent = panel
+            b.Parent = rows
             local bc = Instance.new("UICorner")
-            bc.CornerRadius = UDim.new(0, 6)
+            bc.CornerRadius = UDim.new(0, 8)
             bc.Parent = b
 
             local function refresh()
@@ -2582,36 +2659,44 @@ do
                 b.BackgroundColor3 = on and Color3.fromRGB(20, 110, 60) or Color3.fromRGB(90, 30, 30)
             end
 
-            b.MouseButton1Click:Connect(function()
-                setter(not getter())
-                refresh()
-            end)
-            b.TouchTap:Connect(function()
+            b.Activated:Connect(function()
                 setter(not getter())
                 refresh()
             end)
 
             refresh()
+            openCount = openCount + 1
             return b
         end
 
-        local grip = Instance.new("TextButton")
-        grip.Size = UDim2.new(0, 88, 0, 22)
-        grip.BackgroundColor3 = Color3.fromRGB(0, 90, 120)
-        grip.Text = "⚡ ACTIONS  ▾"
-        grip.TextColor3 = Color3.fromRGB(220, 250, 255)
-        grip.TextSize = 11
-        grip.Font = Enum.Font.GothamBold
-        grip.AutoButtonColor = false
-        grip.BorderSizePixel = 0
-        grip.LayoutOrder = 0
-        grip.Parent = panel
-        local gc = Instance.new("UICorner")
-        gc.CornerRadius = UDim.new(0, 6)
-        gc.Parent = grip
+        local header = Instance.new("TextButton")
+        header.Size = UDim2.new(1, 0, 1, 0)
+        header.BackgroundColor3 = Color3.fromRGB(0, 90, 120)
+        header.BackgroundTransparency = 0.15
+        header.Text = "⚡ 0"
+        header.TextColor3 = Color3.fromRGB(220, 250, 255)
+        header.TextSize = 13
+        header.Font = Enum.Font.GothamBold
+        header.AutoButtonColor = false
+        header.BorderSizePixel = 0
+        header.Parent = panel
+        local hc = Instance.new("UICorner")
+        hc.CornerRadius = UDim.new(0, 10)
+        hc.Parent = header
 
-        -- ============ COMBAT TOGGLES ============
-        makeToggle(1, "Pursue", function()
+        local function updateHeaderText()
+            local active = 0
+            if Config.TweenToNearest or Config.TweenToPlayer then active = active + 1 end
+            if Config.FlaggedM1 then active = active + 1 end
+            if SilentAimModule.GetPlayers and SilentAimModule.GetPlayers() then active = active + 1 end
+            if Hub.PanicFleeEnabled then active = active + 1 end
+            if Config.FruitM1 then active = active + 1 end
+            if Hub.DragonGunEnabled then active = active + 1 end
+            if Hub.IsMobBringEnabled and Hub.IsMobBringEnabled() then active = active + 1 end
+            header.Text = expanded and "⚡ CLOSE" or ("⚡ " .. active)
+        end
+
+        makeToggle("Pursue", function()
             return Config.TweenToNearest
         end, function(v)
             Config.TweenToNearest = v
@@ -2625,74 +2710,78 @@ do
             SetRayfieldFlag("TweenNearest", v)
         end, "TweenNearest")
 
-        makeToggle(2, "M1", function()
+        makeToggle("M1", function()
             return Config.FlaggedM1
         end, function(v)
             Config.FlaggedM1 = v
             SetRayfieldFlag("FlaggedM1", v)
         end, "FlaggedM1")
 
-        makeToggle(3, "Aim", function()
+        makeToggle("Aim", function()
             return SilentAimModule.GetPlayers and SilentAimModule.GetPlayers() or false
         end, function(v)
             SilentAimModule:SetPlayers(v)
         end, "SAPlayers")
 
-        makeToggle(4, "Flee", function()
+        makeToggle("Flee", function()
             return Hub.PanicFleeEnabled
         end, function(v)
             Hub.PanicFleeEnabled = v
             SetRayfieldFlag("PanicFlee", v)
         end, "PanicFlee")
 
-        makeToggle(5, "Aura", function()
+        makeToggle("Aura", function()
             return Config.FruitM1
         end, function(v)
             Config.FruitM1 = v
             SetRayfieldFlag("FruitM1", v)
         end, "FruitM1")
 
-        makeToggle(6, "Gun", function()
+        makeToggle("Gun", function()
             return Hub.DragonGunEnabled
         end, function(v)
             Hub.DragonGunEnabled = v
             SetRayfieldFlag("DragonGunM1", v)
         end, "DragonGunM1")
 
-        makeToggle(7, "Bring", function()
+        makeToggle("Bring", function()
             return Hub.IsMobBringEnabled and Hub.IsMobBringEnabled() or false
         end, function(v)
             if v then Hub.StartMobBring() else Hub.StopMobBring() end
         end, "BringNPC")
 
-        -- collapse behavior
-        grip.MouseButton1Click:Connect(function()
-            collapsed = not collapsed
-            for _, b in ipairs(panel:GetChildren()) do
-                if b:IsA("TextButton") and b ~= grip then
-                    b.Visible = not collapsed
-                end
+        local function SetExpanded(state)
+            expanded = state
+            rows.Visible = state
+            if state then
+                panel.Size = UDim2.new(0, 92, 0, 30 + openCount * 32 + 4)
+            else
+                panel.Size = UDim2.new(0, 92, 0, 30)
             end
-            grip.Text = collapsed and "⚡" or "⚡ ACTIONS  ▾"
-            panel.Size = collapsed and UDim2.new(0, 88, 0, 26) or UDim2.new(0, 96, 0, 260)
-        end)
-        grip.TouchTap:Connect(function()
-            collapsed = not collapsed
-            for _, b in ipairs(panel:GetChildren()) do
-                if b:IsA("TextButton") and b ~= grip then
-                    b.Visible = not collapsed
-                end
-            end
-            grip.Text = collapsed and "⚡" or "⚡ ACTIONS  ▾"
-            panel.Size = collapsed and UDim2.new(0, 88, 0, 26) or UDim2.new(0, 96, 0, 260)
+            updateHeaderText()
+        end
+
+        header.Activated:Connect(function()
+            SetExpanded(not expanded)
         end)
 
-        -- drag panel
-        local dragging, dragStart, startPos
-        panel.InputBegan:Connect(function(input)
+        task.spawn(function()
+            while true do
+                task.wait(2)
+                if not expanded then
+                    updateHeaderText()
+                end
+            end
+        end)
+
+        local dragging = false
+        local moved = false
+        local dragStart, startPos
+        header.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.Touch
             or input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = true
+                moved = false
                 dragStart = input.Position
                 startPos = panel.Position
                 input.Changed:Connect(function()
@@ -2706,10 +2795,15 @@ do
             if dragging and (input.UserInputType == Enum.UserInputType.Touch
             or input.UserInputType == Enum.UserInputType.MouseMovement) then
                 local delta = input.Position - dragStart
-                panel.Position = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + delta.X,
-                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
-                )
+                if delta.Magnitude > 6 then
+                    moved = true
+                end
+                if moved then
+                    panel.Position = UDim2.new(
+                        startPos.X.Scale, startPos.X.Offset + delta.X,
+                        startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                    )
+                end
             end
         end)
     end
@@ -2774,6 +2868,135 @@ function Hub.ApplyFPSBoost()
 end
 
 -- ============================================================
+--  CONFIG PERSISTENCE (custom — settings + player list survive)
+-- ============================================================
+do
+    local SAVE_FILE = "AlienHub_Settings.json"
+
+    local CONFIG_KEYS = {"Fly","AutoHaki","AutoV4","FlaggedM1","FruitM1","TweenToPlayer","TweenToNearest","ESP","NoClip","AntiStun","IceWater"}
+
+    local HUB_KEYS = {
+        "TweenSpeedVal","TeamCheckEnabled","MinTargetLevel","InstaSnapDistance","TweenRecalcThreshold","TweenMaxRange",
+        "TweenXOffset","TweenYOffset","TweenZOffset","FlaggedRange","FruitM1Range","DragonGunRange",
+        "MobBringRange","MobBringHold","OrbitRadius","OrbitSpeed","DashLengthValue",
+        "PanicFleeThreshold","PanicFleeResetHealth","HitboxSize","HitboxTransparency",
+        "BountyMinSingle","BountyMinTotal","BountyMaxPages","BountyScanTimeout",
+        "BountyTeleportRetryWait","BountyPostTeleportWait","BountyMaxJoinAttempts","ListMode"
+    }
+
+    local FLAG_MAP = {
+        Fly = "Fly", AutoHaki = "AutoHaki", AutoV4 = "AutoV4",
+        FlaggedM1 = "FlaggedM1", FruitM1 = "FruitM1",
+        TweenToPlayer = "TweenPlayer", TweenToNearest = "TweenNearest",
+        ESP = "ESP", NoClip = "NoClipToggle", AntiStun = "AntiStunToggle", IceWater = "IceWaterToggle",
+        TweenSpeedVal = "TweenSpeed", TeamCheckEnabled = "TeamCheck", MinTargetLevel = "MinTargetLevel",
+        InstaSnapDistance = "InstaSnap", TweenXOffset = "TweenXOff", TweenYOffset = "TweenYOff", TweenZOffset = "TweenZOff",
+        FlaggedRange = "FlaggedRange", FruitM1Range = "FruitRange", DragonGunRange = "DragonGunRange",
+        MobBringRange = "BringRange", MobBringHold = "BringHold", OrbitRadius = "OrbitRadius", OrbitSpeed = "OrbitSpeed",
+        DashLengthValue = "DashLengthVal", HitboxSize = "HitboxSize", HitboxTransparency = "HitboxTransparency",
+        BountyMinSingle = "BountyMinSingle", BountyMinTotal = "BountyMinTotal", BountyMaxPages = "BountyPages"
+    }
+
+    local LIST_MODE_LABELS = {
+        Off = "Off",
+        Blacklist = "Blacklist (never target listed)",
+        Whitelist = "Whitelist (only target listed)"
+    }
+
+    function Hub.SaveHubConfig(silent)
+        local ok, err = pcall(function()
+            if not writefile then error("no writefile") end
+            local data = { config = {}, hub = {}, list = {} }
+            for _, k in ipairs(CONFIG_KEYS) do
+                data.config[k] = Config[k]
+            end
+            for _, k in ipairs(HUB_KEYS) do
+                data.hub[k] = Hub[k]
+            end
+            local i = 0
+            for name in pairs(Hub.PlayerList) do
+                i = i + 1
+                data.list[i] = name
+            end
+            writefile(SAVE_FILE, HttpService:JSONEncode(data))
+        end)
+        if not silent then
+            if ok then
+                Notify("Config", "Settings saved", 2)
+            else
+                Notify("Config", "Save failed — executor lacks writefile", 3)
+            end
+        end
+        return ok
+    end
+
+    function Hub.LoadHubConfig()
+        local ok, data = pcall(function()
+            if not readfile or not isfile or not isfile(SAVE_FILE) then return nil end
+            return HttpService:JSONDecode(readfile(SAVE_FILE))
+        end)
+        if not ok or type(data) ~= "table" then return false end
+
+        pcall(function()
+            if data.config then
+                for k, v in pairs(data.config) do
+                    if Config[k] ~= nil then Config[k] = v end
+                end
+            end
+            if data.hub then
+                for k, v in pairs(data.hub) do
+                    if Hub[k] ~= nil and type(v) ~= "function" and type(v) ~= "table" then
+                        Hub[k] = v
+                    end
+                end
+            end
+            if type(data.list) == "table" then
+                Hub.PlayerList = {}
+                for _, name in ipairs(data.list) do
+                    Hub.PlayerList[name] = true
+                end
+            end
+        end)
+
+        -- sync hub UI visuals to loaded values
+        pcall(function()
+            local function syncFlag(key, value)
+                local flag = FLAG_MAP[key]
+                local el = flag and Rayfield.Flags and Rayfield.Flags[flag]
+                if el and el.Set then
+                    pcall(function() el:Set(value) end)
+                end
+            end
+            for k, v in pairs(data.config or {}) do syncFlag(k, v) end
+            for k, v in pairs(data.hub or {}) do syncFlag(k, v) end
+            local modeEl = Rayfield.Flags and Rayfield.Flags["ListMode"]
+            if modeEl and modeEl.Set and Hub.ListMode and LIST_MODE_LABELS[Hub.ListMode] then
+                pcall(function() modeEl:Set(LIST_MODE_LABELS[Hub.ListMode]) end)
+            end
+            if Hub.RefreshListDropdowns then
+                pcall(Hub.RefreshListDropdowns)
+            end
+        end)
+        return true
+    end
+
+    function Hub.ResetHubConfig()
+        pcall(function()
+            if isfile and isfile(SAVE_FILE) then delfile(SAVE_FILE) end
+        end)
+        Notify("Config", "Saved settings erased — defaults on next load", 3)
+    end
+
+    -- autosave every 30s
+    task.spawn(function()
+        while true do
+            task.wait(30)
+            Hub.SaveHubConfig(true)
+        end
+    end)
+end
+
+-- ============================================================
 --  UI | MAIN TAB
 -- ============================================================
 MainTab:CreateToggle({
@@ -2803,6 +3026,20 @@ MainTab:CreateToggle({
     Callback = function(Value)
         Hub.PanicFleeEnabled = Value
         Notify("Panic Flee", Value and ("Armed — flees below " .. Hub.PanicFleeThreshold .. " HP") or "Disabled", 2)
+    end
+})
+
+MainTab:CreateButton({
+    Name = "Save Config Now",
+    Callback = function()
+        Hub.SaveHubConfig(false)
+    end
+})
+
+MainTab:CreateButton({
+    Name = "Reset Saved Config",
+    Callback = function()
+        Hub.ResetHubConfig()
     end
 })
 
@@ -3473,6 +3710,10 @@ do
         end
     })
 
+    Hub.RefreshListDropdowns = function()
+        pcall(function() ListRemoveDropdown:Refresh(getListEntries()) end)
+    end
+
     PlayerTab:CreateButton({
         Name = "+ Add Listed Player",
         Callback = function()
@@ -4044,11 +4285,15 @@ do
 end
 
 -- ============================================================
---  INITIALIZE DEFAULTS
+--  INITIALIZE DEFAULTS (load saved config first, then start modules)
 -- ============================================================
 task.spawn(function()
-    task.wait(0.5)
-    Hub.StartFly()
+    task.wait(0.3)
+    Hub.LoadHubConfig()
+    task.wait(0.3)
+    if Config.Fly then
+        Hub.StartFly()
+    end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.9.5 loaded — quick actions active", 3)
+    Notify("Alien Hub", "v3.9.7 loaded — config persistence active", 3)
 end)
