@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.9.2 — smooth pursuit, gun reverted)
+--  ALIEN HUB | Rayfield UI (v3.9.5 — quick actions, mobile-first)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -83,6 +83,8 @@ local Hub = {
     BountyTeleportRetryWait = 12,
     BountyPostTeleportWait = 3,
     BountyMaxJoinAttempts = 10,
+    ListMode = "Off",
+    PlayerList = {},
 }
 
 Hub.Net, Hub.RegisterAttack, Hub.RegisterHit, Hub.NetModule = nil, nil, nil, nil
@@ -105,13 +107,17 @@ do -- NETWORK CACHE
 end
 
 -- ============================================================
---  WINDOW
+--  WINDOW (config saving enabled)
 -- ============================================================
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.9.2 | initializing modules...",
-    ConfigurationSaving = { Enabled = false },
+    LoadingSubtitle = "v3.9.5 | initializing modules...",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "AlienHub",
+        FileName = "Config"
+    },
     KeySystem = false
 })
 
@@ -262,6 +268,13 @@ local function IsAlly(targetPlayer)
 end
 
 -- ============================================================
+--  PLAYER LIST SYSTEM
+-- ============================================================
+Hub.IsListed = function(name)
+    return Hub.PlayerList[name] == true
+end
+
+-- ============================================================
 --  SAFEZONE GEOMETRY + PVP STATE + TARGET FILTERS
 -- ============================================================
 Hub.GetPVPState, Hub.IsInCombat, Hub.ShouldSkipPlayerTarget = nil, nil, nil
@@ -364,6 +377,13 @@ do
 
     local function ShouldSkipPlayerTarget(p)
         if p == player then return true end
+
+        if Hub.ListMode == "Blacklist" and Hub.IsListed(p.Name) then
+            return true
+        elseif Hub.ListMode == "Whitelist" and not Hub.IsListed(p.Name) then
+            return true
+        end
+
         if Hub.TeamCheckEnabled and p.Team and player.Team and p.Team == player.Team then return true end
         if p:GetAttribute("IslandRaiding") == true then return true end
         if p:GetAttribute("PvpDisabled") == true then return true end
@@ -473,11 +493,117 @@ if Hub.Validator then
 end
 
 -- ============================================================
---  FLY (mobile joystick + PC keyboard)
+--  FLY (mobile: joystick + hold ▲▼ buttons | PC: WASD/Space/Ctrl)
 -- ============================================================
 do
     local FlyConnection = nil
     local bv, bg = nil, nil
+    local flyVertical = 0
+    local FlyVertGui = nil
+
+    local function CreateFlyButtons()
+        if FlyVertGui then return end
+        pcall(function()
+            FlyVertGui = Instance.new("ScreenGui")
+            FlyVertGui.Name = "AlienFlyVert"
+            FlyVertGui.ResetOnSpawn = false
+            FlyVertGui.DisplayOrder = 999
+            local okRoot = pcall(function()
+                FlyVertGui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+            end)
+            if not FlyVertGui.Parent then
+                FlyVertGui.Parent = player:WaitForChild("PlayerGui")
+            end
+
+            local holder = Instance.new("Frame")
+            holder.Name = "Holder"
+            holder.Size = UDim2.new(0, 128, 0, 58)
+            holder.Position = UDim2.new(1, -148, 1, -250)
+            holder.BackgroundTransparency = 1
+            holder.Active = true
+            holder.Parent = FlyVertGui
+
+            local function makeBtn(xOffset, label)
+                local b = Instance.new("TextButton")
+                b.Size = UDim2.new(0, 58, 0, 58)
+                b.Position = UDim2.new(0, xOffset, 0, 0)
+                b.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+                b.BackgroundTransparency = 0.25
+                b.Text = label
+                b.TextColor3 = Color3.fromRGB(0, 255, 255)
+                b.TextSize = 22
+                b.Font = Enum.Font.GothamBold
+                b.AutoButtonColor = false
+                b.BorderSizePixel = 0
+                b.Parent = holder
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 12)
+                c.Parent = b
+                local s = Instance.new("UIStroke")
+                s.Color = Color3.fromRGB(0, 200, 255)
+                s.Thickness = 1.5
+                s.Transparency = 0.3
+                s.Parent = b
+                return b
+            end
+
+            local upBtn = makeBtn(0, "▲")
+            local downBtn = makeBtn(70, "▼")
+
+            local function bindHold(btn, dir)
+                btn.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.Touch
+                    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        flyVertical = dir
+                    end
+                end)
+                btn.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.Touch
+                    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        if flyVertical == dir then flyVertical = 0 end
+                    end
+                end)
+            end
+            bindHold(upBtn, 1)
+            bindHold(downBtn, -1)
+
+            local dragging, dragStart, startPos
+            holder.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Touch
+                or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = true
+                    dragStart = input.Position
+                    startPos = holder.Position
+                    input.Changed:Connect(function()
+                        if input.UserInputState == Enum.UserInputState.End then
+                            dragging = false
+                        end
+                    end)
+                end
+            end)
+            UserInputService.InputChanged:Connect(function(input)
+                if dragging and (input.UserInputType == Enum.UserInputType.Touch
+                or input.UserInputType == Enum.UserInputType.MouseMovement) then
+                    local delta = input.Position - dragStart
+                    holder.Position = UDim2.new(
+                        startPos.X.Scale, startPos.X.Offset + delta.X,
+                        startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                    )
+                end
+            end)
+        end)
+    end
+
+    local function SetFlyButtons(vis)
+        if not UserInputService.TouchEnabled then return end
+        if vis then
+            CreateFlyButtons()
+            if FlyVertGui then FlyVertGui.Enabled = true end
+        else
+            flyVertical = 0
+            if FlyVertGui then FlyVertGui.Enabled = false end
+        end
+    end
 
     local function StopFly()
         if FlyConnection then FlyConnection:Disconnect(); FlyConnection = nil end
@@ -494,10 +620,12 @@ do
             end
         end
         bv, bg = nil, nil
+        SetFlyButtons(false)
     end
 
     local function StartFly()
         StopFly()
+        SetFlyButtons(true)
         FlyConnection = RunService.RenderStepped:Connect(function(dt)
             if not Config.Fly then StopFly() return end
             local char = player.Character
@@ -546,6 +674,10 @@ do
             if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= cam.CFrame.RightVector end
             if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.new(0, 1, 0) end
             if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0, 1, 0) end
+
+            if flyVertical ~= 0 then
+                move += Vector3.new(0, flyVertical, 0)
+            end
 
             if move.Magnitude > 0 then
                 move = move.Unit
@@ -810,7 +942,7 @@ do
 end
 
 -- ============================================================
---  DRAGON GUN M1 (v3.9.2 — reverted to v3.7 proven core)
+--  DRAGON GUN M1 (v3.7 proven core)
 -- ============================================================
 do
     local ShootGunEvent, Validator2, ShootFunction = nil, nil, nil
@@ -891,7 +1023,6 @@ do
         return math.floor(v9 / v4 * 16777215), v7
     end
 
-    -- v3.7 targeting: closest HRP among mobs + players
     local function GetClosestDragonTarget(myHRP)
         local closest, dist = nil, Hub.DragonGunRange
         local myPos = myHRP.Position
@@ -909,7 +1040,7 @@ do
         end
 
         for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= player and p.Character then
+            if not Hub.ShouldSkipPlayerTarget(p) and p.Character then
                 local hum = p.Character:FindFirstChild("Humanoid")
                 local r = p.Character:FindFirstChild("HumanoidRootPart")
                 if hum and hum.Health > 0 and r then
@@ -1112,6 +1243,10 @@ do
                 task.wait()
             end
         end)
+    end
+
+    function Hub.IsMobBringEnabled()
+        return Bring.Enabled
     end
 end
 
@@ -1342,7 +1477,7 @@ do
 end
 
 -- ============================================================
---  MOVEMENT | SMOOTH PURSUIT (velocity chase — no recreation churn)
+--  MOVEMENT | SMOOTH PURSUIT
 -- ============================================================
 do
     local TweenConnection = nil
@@ -1416,7 +1551,6 @@ do
             local toTarget = aimPos - myHRP.Position
             local dist = toTarget.Magnitude
 
-            -- SNAP ZONE with hysteresis
             if rawDist > Hub.InstaSnapDistance * 1.5 then
                 SnapArmed = true
             end
@@ -1427,7 +1561,6 @@ do
                 return
             end
 
-            -- ease-out landing
             if dist < 30 then
                 speed = math.max(speed * (dist / 30), 10)
             end
@@ -1836,6 +1969,13 @@ do
             return false
         end
 
+        -- PLAYER LIST SYSTEM — silent aim hook
+        if Hub.ListMode == "Blacklist" and Hub.IsListed(targetplayer.Name) then
+            return false
+        elseif Hub.ListMode == "Whitelist" and not Hub.IsListed(targetplayer.Name) then
+            return false
+        end
+
         local myTeam = player.Team
         local targetTeam = targetplayer.Team
 
@@ -2230,6 +2370,10 @@ do
         SilentAimPlayersEnabled = v
     end
 
+    function SilentAimModule:GetPlayers()
+        return SilentAimPlayersEnabled
+    end
+
     function SilentAimModule:SetNPCs(v)
         UserWantsNPCAim = v
         SilentAimNPCsEnabled = v
@@ -2265,6 +2409,309 @@ do
 
     function SilentAimModule:SetSelectedPlayer(plr)
         Selectedplayer = plr
+    end
+end
+
+-- ============================================================
+--  MOBILE | FLOATING HUB TOGGLE (tap to hide/show UI)
+-- ============================================================
+do
+    local ToggleGui = Instance.new("ScreenGui")
+    ToggleGui.Name = "AlienUIToggle"
+    ToggleGui.ResetOnSpawn = false
+    ToggleGui.DisplayOrder = 1000
+    local okRoot = pcall(function()
+        ToggleGui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+    end)
+    if not ToggleGui.Parent then
+        ToggleGui.Parent = player:WaitForChild("PlayerGui")
+    end
+
+    local btn = Instance.new("TextButton")
+    btn.Name = "ToggleBtn"
+    btn.Size = UDim2.new(0, 46, 0, 46)
+    btn.Position = UDim2.new(0, 12, 0.4, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    btn.BackgroundTransparency = 0.2
+    btn.Text = "AH"
+    btn.TextColor3 = Color3.fromRGB(0, 255, 255)
+    btn.TextSize = 16
+    btn.Font = Enum.Font.GothamBlack
+    btn.AutoButtonColor = false
+    btn.BorderSizePixel = 0
+    btn.Parent = ToggleGui
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(1, 0)
+    c.Parent = btn
+    local s = Instance.new("UIStroke")
+    s.Color = Color3.fromRGB(0, 255, 255)
+    s.Thickness = 2
+    s.Transparency = 0.3
+    s.Parent = btn
+
+    local function GetRayfieldGui()
+        local roots = {}
+        pcall(function() roots[#roots + 1] = gethui and gethui() end)
+        pcall(function() roots[#roots + 1] = game:GetService("CoreGui") end)
+        pcall(function() roots[#roots + 1] = player:FindFirstChild("PlayerGui") end)
+        for _, root in ipairs(roots) do
+            if root then
+                local g = root:FindFirstChild("Rayfield")
+                if g and g:IsA("ScreenGui") then
+                    return g
+                end
+            end
+        end
+        return nil
+    end
+
+    local dragging, dragStart, startPos, moved
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch
+        or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            moved = false
+            dragStart = input.Position
+            startPos = btn.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.Touch
+        or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = input.Position - dragStart
+            if delta.Magnitude > 6 then moved = true end
+            btn.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch
+        or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if not moved then
+                local gui = GetRayfieldGui()
+                if gui then
+                    gui.Enabled = not gui.Enabled
+                else
+                    Notify("Alien Hub", "UI not found — re-execute the loader", 3)
+                end
+            end
+        end
+    end)
+end
+
+-- ============================================================
+--  MOBILE | QUICK ACTION PANEL (floating keybind-style toggles)
+-- ============================================================
+do
+    if UserInputService.TouchEnabled then
+        local PanelGui = Instance.new("ScreenGui")
+        PanelGui.Name = "AlienQuickActions"
+        PanelGui.ResetOnSpawn = false
+        PanelGui.DisplayOrder = 998
+        local okRoot = pcall(function()
+            PanelGui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+        end)
+        if not PanelGui.Parent then
+            PanelGui.Parent = player:WaitForChild("PlayerGui")
+        end
+
+        local panel = Instance.new("Frame")
+        panel.Name = "Panel"
+        panel.Size = UDim2.new(0, 96, 0, 260)
+        panel.Position = UDim2.new(1, -110, 0.25, 0)
+        panel.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
+        panel.BackgroundTransparency = 0.35
+        panel.BorderSizePixel = 0
+        panel.Active = true
+        panel.Parent = PanelGui
+
+        local pc = Instance.new("UICorner")
+        pc.CornerRadius = UDim.new(0, 10)
+        pc.Parent = panel
+        local ps = Instance.new("UIStroke")
+        ps.Color = Color3.fromRGB(0, 200, 255)
+        ps.Thickness = 1.5
+        ps.Transparency = 0.4
+        ps.Parent = panel
+
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0, 4)
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = panel
+
+        local collapsed = false
+
+        local function SetRayfieldFlag(flag, value)
+            pcall(function()
+                local el = Rayfield.Flags and Rayfield.Flags[flag]
+                if el and el.Set then
+                    el:Set(value)
+                end
+            end)
+        end
+
+        local function makeToggle(order, label, getter, setter, flag)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(0, 88, 0, 26)
+            b.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+            b.Text = label .. ": ?"
+            b.TextColor3 = Color3.fromRGB(255, 255, 255)
+            b.TextSize = 11
+            b.Font = Enum.Font.GothamBold
+            b.AutoButtonColor = false
+            b.BorderSizePixel = 0
+            b.LayoutOrder = order
+            b.Parent = panel
+            local bc = Instance.new("UICorner")
+            bc.CornerRadius = UDim.new(0, 6)
+            bc.Parent = b
+
+            local function refresh()
+                local on = getter()
+                b.Text = label .. ": " .. (on and "ON" or "OFF")
+                b.BackgroundColor3 = on and Color3.fromRGB(20, 110, 60) or Color3.fromRGB(90, 30, 30)
+            end
+
+            b.MouseButton1Click:Connect(function()
+                setter(not getter())
+                refresh()
+            end)
+            b.TouchTap:Connect(function()
+                setter(not getter())
+                refresh()
+            end)
+
+            refresh()
+            return b
+        end
+
+        local grip = Instance.new("TextButton")
+        grip.Size = UDim2.new(0, 88, 0, 22)
+        grip.BackgroundColor3 = Color3.fromRGB(0, 90, 120)
+        grip.Text = "⚡ ACTIONS  ▾"
+        grip.TextColor3 = Color3.fromRGB(220, 250, 255)
+        grip.TextSize = 11
+        grip.Font = Enum.Font.GothamBold
+        grip.AutoButtonColor = false
+        grip.BorderSizePixel = 0
+        grip.LayoutOrder = 0
+        grip.Parent = panel
+        local gc = Instance.new("UICorner")
+        gc.CornerRadius = UDim.new(0, 6)
+        gc.Parent = grip
+
+        -- ============ COMBAT TOGGLES ============
+        makeToggle(1, "Pursue", function()
+            return Config.TweenToNearest
+        end, function(v)
+            Config.TweenToNearest = v
+            if v then
+                Config.TweenToPlayer = false
+                SetRayfieldFlag("TweenPlayer", false)
+                Hub.StartTween()
+            else
+                Hub.StopTween()
+            end
+            SetRayfieldFlag("TweenNearest", v)
+        end, "TweenNearest")
+
+        makeToggle(2, "M1", function()
+            return Config.FlaggedM1
+        end, function(v)
+            Config.FlaggedM1 = v
+            SetRayfieldFlag("FlaggedM1", v)
+        end, "FlaggedM1")
+
+        makeToggle(3, "Aim", function()
+            return SilentAimModule.GetPlayers and SilentAimModule.GetPlayers() or false
+        end, function(v)
+            SilentAimModule:SetPlayers(v)
+        end, "SAPlayers")
+
+        makeToggle(4, "Flee", function()
+            return Hub.PanicFleeEnabled
+        end, function(v)
+            Hub.PanicFleeEnabled = v
+            SetRayfieldFlag("PanicFlee", v)
+        end, "PanicFlee")
+
+        makeToggle(5, "Aura", function()
+            return Config.FruitM1
+        end, function(v)
+            Config.FruitM1 = v
+            SetRayfieldFlag("FruitM1", v)
+        end, "FruitM1")
+
+        makeToggle(6, "Gun", function()
+            return Hub.DragonGunEnabled
+        end, function(v)
+            Hub.DragonGunEnabled = v
+            SetRayfieldFlag("DragonGunM1", v)
+        end, "DragonGunM1")
+
+        makeToggle(7, "Bring", function()
+            return Hub.IsMobBringEnabled and Hub.IsMobBringEnabled() or false
+        end, function(v)
+            if v then Hub.StartMobBring() else Hub.StopMobBring() end
+        end, "BringNPC")
+
+        -- collapse behavior
+        grip.MouseButton1Click:Connect(function()
+            collapsed = not collapsed
+            for _, b in ipairs(panel:GetChildren()) do
+                if b:IsA("TextButton") and b ~= grip then
+                    b.Visible = not collapsed
+                end
+            end
+            grip.Text = collapsed and "⚡" or "⚡ ACTIONS  ▾"
+            panel.Size = collapsed and UDim2.new(0, 88, 0, 26) or UDim2.new(0, 96, 0, 260)
+        end)
+        grip.TouchTap:Connect(function()
+            collapsed = not collapsed
+            for _, b in ipairs(panel:GetChildren()) do
+                if b:IsA("TextButton") and b ~= grip then
+                    b.Visible = not collapsed
+                end
+            end
+            grip.Text = collapsed and "⚡" or "⚡ ACTIONS  ▾"
+            panel.Size = collapsed and UDim2.new(0, 88, 0, 26) or UDim2.new(0, 96, 0, 260)
+        end)
+
+        -- drag panel
+        local dragging, dragStart, startPos
+        panel.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch
+            or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                dragStart = input.Position
+                startPos = panel.Position
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
+                    end
+                end)
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.Touch
+            or input.UserInputType == Enum.UserInputType.MouseMovement) then
+                local delta = input.Position - dragStart
+                panel.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
+            end
+        end)
     end
 end
 
@@ -2638,14 +3085,14 @@ SilentAimTab:CreateSlider({
 --  UI | MOVEMENT TAB
 -- ============================================================
 MovementTab:CreateToggle({
-    Name = "Fly (Mobile: use joystick / PC: WASD)",
+    Name = "Fly (Mobile: joystick + ▲▼ buttons)",
     CurrentValue = true,
     Flag = "Fly",
     Callback = function(Value)
         Config.Fly = Value
         if Value then
             Hub.StartFly()
-            Notify("Fly", "Enabled", 2)
+            Notify("Fly", "Enabled — ▲▼ buttons on screen", 2)
         else
             Hub.StopFly()
             Notify("Fly", "Disabled", 2)
@@ -2930,7 +3377,7 @@ VisualTab:CreateButton({
 })
 
 -- ============================================================
---  UI | PLAYERS TAB
+--  UI | PLAYERS TAB (target select + player lists)
 -- ============================================================
 do
     local playerNames = {}
@@ -2974,11 +3421,104 @@ do
         end
     })
 
+    local function getListEntries()
+        local entries = {}
+        for name, _ in pairs(Hub.PlayerList) do
+            table.insert(entries, name)
+        end
+        return entries
+    end
+
+    PlayerTab:CreateSection("Player Lists (protect / hunt)")
+
+    PlayerTab:CreateDropdown({
+        Name = "List Mode",
+        Options = {"Off", "Blacklist (never target listed)", "Whitelist (only target listed)"},
+        CurrentOption = {"Off"},
+        MultipleOptions = false,
+        Flag = "ListMode",
+        Callback = function(Option)
+            local mode = Option[1] or "Off"
+            if mode:find("Blacklist") then
+                Hub.ListMode = "Blacklist"
+            elseif mode:find("Whitelist") then
+                Hub.ListMode = "Whitelist"
+            else
+                Hub.ListMode = "Off"
+            end
+            Notify("List Mode",
+                Hub.ListMode == "Blacklist" and "Listed players are PROTECTED" or
+                Hub.ListMode == "Whitelist" and "ONLY listed players are targetable" or
+                "List system off", 3)
+        end
+    })
+
+    local ListAddDropdown = PlayerTab:CreateDropdown({
+        Name = "Add Player to List",
+        Options = playerNames,
+        CurrentOption = {},
+        MultipleOptions = false,
+        Flag = "ListAdd",
+        Callback = function(Option)
+        end
+    })
+
+    local ListRemoveDropdown = PlayerTab:CreateDropdown({
+        Name = "Listed Players",
+        Options = getListEntries(),
+        CurrentOption = {},
+        MultipleOptions = false,
+        Flag = "ListRemove",
+        Callback = function(Option)
+        end
+    })
+
+    PlayerTab:CreateButton({
+        Name = "+ Add Listed Player",
+        Callback = function()
+            local sel = ListAddDropdown:Get()
+            local name = sel and sel[1]
+            if name and name ~= "" then
+                Hub.PlayerList[name] = true
+                Notify("Player List", name .. " added (" .. Hub.ListMode .. " mode)", 2)
+                ListRemoveDropdown:Refresh(getListEntries())
+            else
+                Notify("Player List", "Select a player in the dropdown above first", 2)
+            end
+        end
+    })
+
+    PlayerTab:CreateButton({
+        Name = "- Remove Listed Player",
+        Callback = function()
+            local sel = ListRemoveDropdown:Get()
+            local name = sel and sel[1]
+            if name then
+                Hub.PlayerList[name] = nil
+                Notify("Player List", name .. " removed", 2)
+                ListRemoveDropdown:Refresh(getListEntries())
+            else
+                Notify("Player List", "Select a listed player first", 2)
+            end
+        end
+    })
+
+    PlayerTab:CreateButton({
+        Name = "Clear Player List",
+        Callback = function()
+            Hub.PlayerList = {}
+            ListRemoveDropdown:Refresh({})
+            Notify("Player List", "Cleared", 2)
+        end
+    })
+
     PlayerTab:CreateButton({
         Name = "Refresh Player List",
         Callback = function()
             RefreshPlayerDropdown()
             PlayerDropdown:Refresh(playerNames)
+            ListAddDropdown:Refresh(playerNames)
+            ListRemoveDropdown:Refresh(getListEntries())
             Notify("Player List", "Refreshed", 2)
         end
     })
@@ -2987,11 +3527,13 @@ do
         task.wait(1)
         RefreshPlayerDropdown()
         PlayerDropdown:Refresh(playerNames)
+        ListAddDropdown:Refresh(playerNames)
     end)
     Players.PlayerRemoving:Connect(function()
         task.wait(1)
         RefreshPlayerDropdown()
         PlayerDropdown:Refresh(playerNames)
+        ListAddDropdown:Refresh(playerNames)
     end)
 end
 
@@ -3508,5 +4050,5 @@ task.spawn(function()
     task.wait(0.5)
     Hub.StartFly()
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.9.2 loaded — smooth pursuit + reverted gun", 3)
+    Notify("Alien Hub", "v3.9.5 loaded — quick actions active", 3)
 end)
