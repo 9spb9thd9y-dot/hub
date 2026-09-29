@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.10.1 — silent aim fix, smart pursuit)
+--  ALIEN HUB | Rayfield UI (v3.10.3 — guarded hook, crash fix)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -114,7 +114,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.10.1 | initializing modules...",
+    LoadingSubtitle = "v3.10.3 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -726,7 +726,7 @@ do
 end
 
 -- ============================================================
---  AUTO HAKI & V4 (v3.10.1 — 95% gate + CommF_ fallback)
+--  AUTO HAKI & V4 (95% gate + CommF_ fallback)
 -- ============================================================
 do
     task.spawn(function()
@@ -760,7 +760,6 @@ do
                             end
                         end
                         if not fired and Hub.CommF then
-                            -- fallback: the game's own awakening remote (from source script)
                             pcall(function() Hub.CommF:InvokeServer("Awakening", true) end)
                         end
                     end
@@ -1138,7 +1137,7 @@ do
 end
 
 -- ============================================================
---  MOB BRING v2 (v3.10.1 — ownership re-assert every tick, -8 grab)
+--  MOB BRING v2 (ownership re-assert every tick, -8 grab)
 -- ============================================================
 do
     local Bring = {
@@ -1568,7 +1567,7 @@ player.CharacterAdded:Connect(function()
 end)
 
 -- ============================================================
---  MOVEMENT | SMOOTH PURSUIT (v3.10.1 — max range filter)
+--  MOVEMENT | SMOOTH PURSUIT (fly-aware, flee-locked, max-range)
 -- ============================================================
 do
     local TweenConnection = nil
@@ -1938,7 +1937,7 @@ do
 end
 
 -- ============================================================
---  SILENT AIM + PREDICTION (v3.10.1 — IsA hook fix, perf-gated sampler)
+--  SILENT AIM + PREDICTION (v3.10.3 — guarded re-entrant hook)
 -- ============================================================
 local SilentAimModule = {}
 
@@ -1982,7 +1981,7 @@ do
         return buf
     end
 
-    -- sampler only runs while prediction is ON (perf + battery friendly)
+    -- sampler only runs while prediction is ON
     task.spawn(function()
         while true do
             if PredictionEnabled then
@@ -2304,40 +2303,64 @@ do
         if ok and hookMeta then
             setreadonly(hookMeta, false)
             local OldHook
+            local hookDepth = 0
             OldHook = hookmetamethod(game, "__namecall", function(self, V1, V2, ...)
                 local Method = (getnamecallmethod and getnamecallmethod():lower()) or ""
 
-                -- FIXED: IsA check — tostring() returned the remote's NAME, not its class
-                if typeof(self) == "Instance" and self:IsA("RemoteEvent") and Method == "fireserver" then
-                    if typeof(V1) == "Vector3" then
-                        if SilentAimPlayersEnabled and PlayersPosition then
-                            return OldHook(self, PlayersPosition, V2, ...)
-                        elseif SilentAimNPCsEnabled and NPCPosition then
-                            return OldHook(self, NPCPosition, V2, ...)
-                        end
-                    end
-                    if type(V1) == "string" and table.find(Booms, V1) then
-                        if ZSkillorM1 then
-                            if SilentAimPlayersEnabled and PlayersPosition then
-                                return OldHook(self, V1, PlayersPosition, nil, ...)
-                            elseif SilentAimNPCsEnabled and NPCPosition then
-                                return OldHook(self, V1, NPCPosition, nil, ...)
-                            end
-                        end
-                    end
-                elseif Method == "invokeserver" then
-                    if isValidCondition() then
-                        if type(V1) == "string" and table.find(Skills, V1) then
-                            if SilentAimPlayersEnabled and PlayersPosition then
-                                return OldHook(self, V1, PlayersPosition, nil, ...)
-                            elseif SilentAimNPCsEnabled and NPCPosition then
-                                return OldHook(self, V1, NPCPosition, nil, ...)
-                            end
-                        end
-                    end
+                -- re-entrancy guard: never process our own nested calls
+                if hookDepth > 0 then
+                    return OldHook(self, V1, V2, ...)
                 end
+                hookDepth = hookDepth + 1
 
-                return OldHook(self, V1, V2, ...)
+                local result
+                local hookOk, hookErr = pcall(function()
+                    -- FIXED: IsA check — tostring() returned the remote's NAME, not its class
+                    if typeof(self) == "Instance" and self:IsA("RemoteEvent") and Method == "fireserver" then
+                        if typeof(V1) == "Vector3" then
+                            if SilentAimPlayersEnabled and PlayersPosition then
+                                result = table.pack(OldHook(self, PlayersPosition, V2, ...))
+                                return
+                            elseif SilentAimNPCsEnabled and NPCPosition then
+                                result = table.pack(OldHook(self, NPCPosition, V2, ...))
+                                return
+                            end
+                        end
+                        if type(V1) == "string" and table.find(Booms, V1) then
+                            if ZSkillorM1 then
+                                if SilentAimPlayersEnabled and PlayersPosition then
+                                    result = table.pack(OldHook(self, V1, PlayersPosition, nil, ...))
+                                    return
+                                elseif SilentAimNPCsEnabled and NPCPosition then
+                                    result = table.pack(OldHook(self, V1, NPCPosition, nil, ...))
+                                    return
+                                end
+                            end
+                        end
+                    elseif Method == "invokeserver" then
+                        if isValidCondition() then
+                            if type(V1) == "string" and table.find(Skills, V1) then
+                                if SilentAimPlayersEnabled and PlayersPosition then
+                                    result = table.pack(OldHook(self, V1, PlayersPosition, nil, ...))
+                                    return
+                                elseif SilentAimNPCsEnabled and NPCPosition then
+                                    result = table.pack(OldHook(self, V1, NPCPosition, nil, ...))
+                                    return
+                                end
+                            end
+                        end
+                    end
+                    -- no rewrite: pass through
+                    result = table.pack(OldHook(self, V1, V2, ...))
+                end)
+
+                hookDepth = hookDepth - 1
+
+                if not hookOk then
+                    -- hook logic faulted — fall through to the original call untouched
+                    return OldHook(self, V1, V2, ...)
+                end
+                return table.unpack(result and result or {})
             end)
             setreadonly(hookMeta, true)
         end
@@ -2692,10 +2715,11 @@ function Hub.ApplyFPSBoost()
 end
 
 -- ============================================================
---  CONFIG PERSISTENCE (custom — settings + player list survive)
+--  CONFIG PERSISTENCE v2 (diagnostics + visible failures)
 -- ============================================================
 do
     local SAVE_FILE = "AlienHub_Settings.json"
+    local LastSaveError = nil
 
     local CONFIG_KEYS = {"Fly","AutoHaki","AutoV4","FlaggedM1","FruitM1","TweenToPlayer","TweenToNearest","ESP","NoClip","AntiStun","IceWater"}
 
@@ -2730,7 +2754,7 @@ do
 
     function Hub.SaveHubConfig(silent)
         local ok, err = pcall(function()
-            if not writefile then error("no writefile") end
+            if not writefile then error("writefile missing on this executor") end
             local data = { config = {}, hub = {}, list = {} }
             for _, k in ipairs(CONFIG_KEYS) do
                 data.config[k] = Config[k]
@@ -2745,11 +2769,12 @@ do
             end
             writefile(SAVE_FILE, HttpService:JSONEncode(data))
         end)
+        LastSaveError = ok and nil or tostring(err)
         if not silent then
             if ok then
                 Notify("Config", "Settings saved", 2)
             else
-                Notify("Config", "Save failed — executor lacks writefile", 3)
+                Notify("Config", "SAVE FAILED: " .. LastSaveError, 5)
             end
         end
         return ok
@@ -2757,10 +2782,15 @@ do
 
     function Hub.LoadHubConfig()
         local ok, data = pcall(function()
-            if not readfile or not isfile or not isfile(SAVE_FILE) then return nil end
-            return HttpService:JSONDecode(readfile(SAVE_FILE))
+            if not readfile or not isfile then return nil, "readfile/isfile missing" end
+            if not isfile(SAVE_FILE) then return nil, "no save file" end
+            return HttpService:JSONDecode(readfile(SAVE_FILE)), nil
         end)
-        if not ok or type(data) ~= "table" then return false end
+        local loadErr = select(2, ok, data)
+        if not ok or type(data) ~= "table" then
+            if loadErr then LastSaveError = "load: " .. tostring(loadErr) end
+            return false
+        end
 
         pcall(function()
             if data.config then
@@ -2783,20 +2813,10 @@ do
             end
         end)
 
+        -- NOTE: no Rayfield flag sync here on INIT — flag sync happens
+        -- post-load via the deferred task below to avoid touching
+        -- half-initialized UI elements (v3.10.2 crash cause)
         pcall(function()
-            local function syncFlag(key, value)
-                local flag = FLAG_MAP[key]
-                local el = flag and Rayfield.Flags and Rayfield.Flags[flag]
-                if el and el.Set then
-                    pcall(function() el:Set(value) end)
-                end
-            end
-            for k, v in pairs(data.config or {}) do syncFlag(k, v) end
-            for k, v in pairs(data.hub or {}) do syncFlag(k, v) end
-            local modeEl = Rayfield.Flags and Rayfield.Flags["ListMode"]
-            if modeEl and modeEl.Set and Hub.ListMode and LIST_MODE_LABELS[Hub.ListMode] then
-                pcall(function() modeEl:Set(LIST_MODE_LABELS[Hub.ListMode]) end)
-            end
             if Hub.RefreshListDropdowns then
                 pcall(Hub.RefreshListDropdowns)
             end
@@ -2811,11 +2831,37 @@ do
         Notify("Config", "Saved settings erased — defaults on next load", 3)
     end
 
-    -- autosave every 30s
+    -- CONFIG STATUS: tells us exactly where the chain breaks
+    function Hub.ConfigStatus()
+        local lines = {}
+        lines[#lines + 1] = "writefile: " .. (writefile and "YES" or "NO")
+        lines[#lines + 1] = "readfile: " .. (readfile and "YES" or "NO")
+        lines[#lines + 1] = "isfile: " .. (isfile and "YES" or "NO")
+        local exists = false
+        pcall(function() exists = isfile and isfile(SAVE_FILE) or false end)
+        lines[#lines + 1] = "save file exists: " .. (exists and "YES" or "NO")
+        if exists then
+            pcall(function()
+                local content = readfile(SAVE_FILE)
+                lines[#lines + 1] = "file size: " .. #content .. " bytes"
+                local okDecode = pcall(function() HttpService:JSONDecode(content) end)
+                lines[#lines + 1] = "file valid JSON: " .. (okDecode and "YES" or "NO")
+            end)
+        end
+        lines[#lines + 1] = "last error: " .. (LastSaveError or "none")
+        Notify("Config Status", table.concat(lines, "\n"), 10)
+    end
+
+    -- autosave every 30s — ONE visible failure notice (not spam)
+    local autosaveFailNotified = false
     task.spawn(function()
         while true do
             task.wait(30)
-            Hub.SaveHubConfig(true)
+            local ok = Hub.SaveHubConfig(true)
+            if not ok and not autosaveFailNotified then
+                autosaveFailNotified = true
+                Notify("Config", "Autosave failing: " .. (LastSaveError or "unknown") .. " — check Config Status button", 6)
+            end
         end
     end)
 end
@@ -2864,6 +2910,13 @@ MainTab:CreateButton({
     Name = "Reset Saved Config",
     Callback = function()
         Hub.ResetHubConfig()
+    end
+})
+
+MainTab:CreateButton({
+    Name = "Config Status (diagnostics)",
+    Callback = function()
+        Hub.ConfigStatus()
     end
 })
 
@@ -4121,15 +4174,39 @@ do
 end
 
 -- ============================================================
---  INITIALIZE DEFAULTS (load saved config first, then start modules)
+--  INITIALIZE DEFAULTS
+--  (load saved values, DEFERRED flag-sync after UI fully built)
 -- ============================================================
 task.spawn(function()
     task.wait(0.3)
     Hub.LoadHubConfig()
     task.wait(0.3)
+    -- deferred flag sync: Rayfield is now fully built, safe to :Set()
+    pcall(function()
+        local FLAG_SYNC = {
+            Fly = "Fly", AutoHaki = "AutoHaki", AutoV4 = "AutoV4",
+            FlaggedM1 = "FlaggedM1", FruitM1 = "FruitM1",
+            TweenToPlayer = "TweenPlayer", TweenToNearest = "TweenNearest",
+            ESP = "ESP", NoClip = "NoClipToggle", AntiStun = "AntiStunToggle", IceWater = "IceWaterToggle",
+            TweenSpeedVal = "TweenSpeed", TeamCheckEnabled = "TeamCheck", MinTargetLevel = "MinTargetLevel",
+            PursuitMaxRange = "PursuitMaxRange",
+            InstaSnapDistance = "InstaSnap", TweenXOffset = "TweenXOff", TweenYOffset = "TweenYOff", TweenZOffset = "TweenZOff",
+            FlaggedRange = "FlaggedRange", FruitM1Range = "FruitRange", DragonGunRange = "DragonGunRange",
+            MobBringRange = "BringRange", MobBringHold = "BringHold", OrbitRadius = "OrbitRadius", OrbitSpeed = "OrbitSpeed",
+            DashLengthValue = "DashLengthVal", HitboxSize = "HitboxSize", HitboxTransparency = "HitboxTransparency",
+            BountyMinSingle = "BountyMinSingle", BountyMinTotal = "BountyMinTotal", BountyMaxPages = "BountyPages"
+        }
+        for key, flag in pairs(FLAG_SYNC) do
+            local value = Config[key] or Hub[key]
+            local el = Rayfield.Flags and Rayfield.Flags[flag]
+            if value ~= nil and el and el.Set then
+                pcall(function() el:Set(value) end)
+            end
+        end
+    end)
     if Config.Fly then
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.10.1 loaded — bugfix pass complete", 3)
+    Notify("Alien Hub", "v3.10.3 loaded — hook guarded", 3)
 end)
