@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.9.8 — thumb-zone quick actions)
+--  ALIEN HUB | Rayfield UI (v3.9.9 — compact quick actions v3)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -112,7 +112,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.9.8 | initializing modules...",
+    LoadingSubtitle = "v3.9.9 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -2578,7 +2578,7 @@ do
 end
 
 -- ============================================================
---  MOBILE | QUICK ACTIONS v2 (thumb-zone FAB, expand-up, outside-close)
+--  MOBILE | QUICK ACTIONS v3 (smaller FAB, expands downward)
 -- ============================================================
 do
     if UserInputService.TouchEnabled then
@@ -2593,22 +2593,22 @@ do
             PanelGui.Parent = player:WaitForChild("PlayerGui")
         end
 
-        -- container anchored bottom-right; grows UPWARD when expanded
+        -- container TOP-anchored: grows DOWNWARD when expanded
         local container = Instance.new("Frame")
         container.Name = "Container"
-        container.AnchorPoint = Vector2.new(1, 1)
-        container.Position = UDim2.new(1, -14, 1, -320)
-        container.Size = UDim2.new(0, 56, 0, 56)
+        container.AnchorPoint = Vector2.new(1, 0)
+        container.Position = UDim2.new(1, -14, 0.38, 0)
+        container.Size = UDim2.new(0, 48, 0, 48)
         container.BackgroundTransparency = 1
         container.Active = true
         container.Parent = PanelGui
 
-        -- expanded background panel
+        -- expanded background panel (sits BELOW the header)
         local back = Instance.new("Frame")
         back.Name = "Back"
         back.Visible = false
-        back.Position = UDim2.new(0, 0, 0, 0)
-        back.Size = UDim2.new(0, 180, 0, 374)
+        back.Position = UDim2.new(0, 0, 0, 52)
+        back.Size = UDim2.new(0, 150, 0, 302)
         back.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
         back.BackgroundTransparency = 0.2
         back.BorderSizePixel = 0
@@ -2616,7 +2616,7 @@ do
         back.ZIndex = 2
 
         local bc = Instance.new("UICorner")
-        bc.CornerRadius = UDim.new(0, 14)
+        bc.CornerRadius = UDim.new(0, 12)
         bc.Parent = back
         local bs = Instance.new("UIStroke")
         bs.Color = Color3.fromRGB(0, 200, 255)
@@ -2625,28 +2625,27 @@ do
         bs.Parent = back
 
         local backPad = Instance.new("UIPadding")
-        backPad.PaddingTop = UDim.new(0, 8)
-        backPad.PaddingBottom = UDim.new(0, 8)
-        backPad.PaddingLeft = UDim.new(0, 6)
-        backPad.PaddingRight = UDim.new(0, 6)
+        backPad.PaddingTop = UDim.new(0, 6)
+        backPad.PaddingBottom = UDim.new(0, 6)
+        backPad.PaddingLeft = UDim.new(0, 5)
+        backPad.PaddingRight = UDim.new(0, 5)
         backPad.Parent = back
 
         local rlayout = Instance.new("UIListLayout")
-        rlayout.Padding = UDim.new(0, 6)
+        rlayout.Padding = UDim.new(0, 5)
         rlayout.SortOrder = Enum.SortOrder.LayoutOrder
         rlayout.Parent = back
 
-        -- FAB (always visible, bottom of container)
+        -- header/FAB at TOP of container
         local fab = Instance.new("TextButton")
         fab.Name = "FAB"
-        fab.AnchorPoint = Vector2.new(0.5, 1)
-        fab.Position = UDim2.new(0.5, 0, 1, -2)
-        fab.Size = UDim2.new(0, 56, 0, 56)
+        fab.Position = UDim2.new(0, 0, 0, 0)
+        fab.Size = UDim2.new(0, 48, 0, 48)
         fab.BackgroundColor3 = Color3.fromRGB(0, 90, 120)
         fab.BackgroundTransparency = 0.15
         fab.Text = "⚡ 0"
         fab.TextColor3 = Color3.fromRGB(220, 250, 255)
-        fab.TextSize = 17
+        fab.TextSize = 15
         fab.Font = Enum.Font.GothamBlack
         fab.AutoButtonColor = false
         fab.BorderSizePixel = 0
@@ -2675,23 +2674,23 @@ do
 
         local function makeToggle(label, getter, setter, flag)
             local b = Instance.new("TextButton")
-            b.Size = UDim2.new(1, 0, 0, 46)
+            b.Size = UDim2.new(1, 0, 0, 38)
             b.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-            b.Text = label .. "  ·  ?"
+            b.Text = label .. " · ?"
             b.TextColor3 = Color3.fromRGB(255, 255, 255)
-            b.TextSize = 14
+            b.TextSize = 12
             b.Font = Enum.Font.GothamBold
             b.AutoButtonColor = false
             b.BorderSizePixel = 0
             b.Parent = back
             b.ZIndex = 3
             local bc = Instance.new("UICorner")
-            bc.CornerRadius = UDim.new(0, 10)
+            bc.CornerRadius = UDim.new(0, 8)
             bc.Parent = b
 
             local function refresh()
                 local on = getter()
-                b.Text = label .. "  ·  " .. (on and "ON" or "OFF")
+                b.Text = label .. " · " .. (on and "ON" or "OFF")
                 b.BackgroundColor3 = on and Color3.fromRGB(22, 120, 64) or Color3.fromRGB(95, 32, 32)
             end
 
@@ -2771,19 +2770,21 @@ do
             if v then Hub.StartMobBring() else Hub.StopMobBring() end
         end, "BringNPC")
 
-        -- expand / collapse (container grows upward, bottom edge stays fixed)
+        -- expand / collapse (container grows DOWNWARD, top edge stays fixed)
         local function SetExpanded(state)
             expanded = state
             back.Visible = state
             if state then
-                container.Size = UDim2.new(0, 180, 0, 374 + 62)
+                container.Size = UDim2.new(0, 150, 0, 354)
+                fab.Size = UDim2.new(1, 0, 0, 48)
             else
-                container.Size = UDim2.new(0, 56, 0, 56)
+                container.Size = UDim2.new(0, 48, 0, 48)
+                fab.Size = UDim2.new(0, 48, 0, 48)
             end
             updateHeaderText()
         end
 
-        -- FAB: tap = toggle, hold-drag = move (6px threshold)
+        -- header: tap = toggle, hold-drag = move (6px threshold)
         local dragging = false
         local moved = false
         local dragStart, startPos
@@ -2822,7 +2823,7 @@ do
             end
         end)
 
-        -- tap outside closes (mobile QoL)
+        -- tap outside closes
         UserInputService.InputBegan:Connect(function(input, gp)
             if not expanded then return end
             if input.UserInputType ~= Enum.UserInputType.Touch
@@ -4340,5 +4341,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.9.8 loaded — thumb-zone quick actions", 3)
+    Notify("Alien Hub", "v3.9.9 loaded — compact quick actions", 3)
 end)
