@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.10.3 — guarded hook, crash fix)
+--  ALIEN HUB | Rayfield UI (v3.11.0 — browser-remote bounty hopper)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -77,16 +77,16 @@ local Hub = {
     SelectedPlayerName = nil,
     SelectedPlayerObj = nil,
     ActiveTween = nil,
-    BountyMinSingle = 100000000,
-    BountyMinTotal = 30000000,
-    BountyMaxPages = 10,
+    ListMode = "Off",
+    PlayerList = {},
+    FleeLock = false,
+    -- browser hopper settings (ported from source)
+    BountyMinBounty = 100000000,
+    BountyMaxPages = 20,
     BountyScanTimeout = 15,
     BountyTeleportRetryWait = 12,
     BountyPostTeleportWait = 3,
     BountyMaxJoinAttempts = 10,
-    ListMode = "Off",
-    PlayerList = {},
-    FleeLock = false,
 }
 
 Hub.Net, Hub.RegisterAttack, Hub.RegisterHit, Hub.NetModule = nil, nil, nil, nil
@@ -114,7 +114,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.10.3 | initializing modules...",
+    LoadingSubtitle = "v3.11.0 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -143,7 +143,7 @@ local function Notify(title, text, duration)
 end
 
 -- ============================================================
---  BOUNTY HELPERS
+--  FORMAT HELPERS
 -- ============================================================
 local function FormatBounty(n)
     n = tonumber(n) or 0
@@ -154,77 +154,9 @@ local function FormatBounty(n)
     return tostring(math.floor(n))
 end
 
-local function GetPlayerBounty(p)
-    local data = p:FindFirstChild("Data")
-    if data then
-        local b = data:FindFirstChild("Bounty")
-        if b and (b:IsA("NumberValue") or b:IsA("IntValue")) then
-            return b.Value
-        end
-    end
-    local ls = p:FindFirstChild("leaderstats")
-    if ls then
-        local b = ls:FindFirstChild("Bounty") or ls:FindFirstChild("Honor")
-        if b then
-            local raw = tostring(b.Value):gsub(",", "")
-            return tonumber(raw) or 0
-        end
-    end
-    return 0
-end
-
-local function GetCurrentServerBounty()
-    local total, topName, topVal = 0, "None", 0
-    for _, p in ipairs(Players:GetPlayers()) do
-        local b = GetPlayerBounty(p)
-        total = total + b
-        if b > topVal then
-            topVal = b
-            topName = p.Name
-        end
-    end
-    return total, topName, topVal
-end
-
-local function httpGetJson(url)
-    local body = nil
-    pcall(function() body = game:HttpGet(url) end)
-    if not body then
-        local req = (http_request or request or (http and http.request))
-        if req then
-            pcall(function()
-                local resp = req({Url = url, Method = "GET"})
-                body = (type(resp) == "table") and (resp.Body or resp.body) or resp
-            end)
-        end
-    end
-    if not body then return nil end
-    local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
-    if ok then return data end
-    return nil
-end
-
-local function GetServerCandidates(minPlayers)
-    local candidates = {}
-    local data = httpGetJson("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
-    if data and data.data then
-        for _, s in ipairs(data.data) do
-            if s.id ~= game.JobId and s.playing < s.maxPlayers then
-                if not minPlayers or s.playing <= minPlayers then
-                    table.insert(candidates, {id = s.id, playing = s.playing})
-                end
-            end
-        end
-    end
-    return candidates
-end
-
-local function HopToServer(jobId)
-    Notify("Server", "Teleporting...", 2)
-    task.wait(0.5)
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, player)
-    end)
+local function formatCommas(v)
+    local sign, digits = tostring(math.floor(tonumber(v) or 0)):match("^(%-?)(%d+)$")
+    return sign .. digits:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
 end
 
 -- ============================================================
@@ -496,7 +428,6 @@ end
 
 -- ============================================================
 --  FLY (mobile: joystick + hold ▲▼ | PC: WASD/Space/Ctrl)
---  cooperates with pursuit + flee lock
 -- ============================================================
 do
     local FlyConnection = nil
@@ -1937,7 +1868,7 @@ do
 end
 
 -- ============================================================
---  SILENT AIM + PREDICTION (v3.10.3 — guarded re-entrant hook)
+--  SILENT AIM + PREDICTION (guarded re-entrant hook)
 -- ============================================================
 local SilentAimModule = {}
 
@@ -2728,7 +2659,7 @@ do
         "TweenXOffset","TweenYOffset","TweenZOffset","FlaggedRange","FruitM1Range","DragonGunRange",
         "MobBringRange","MobBringHold","OrbitRadius","OrbitSpeed","DashLengthValue",
         "PanicFleeThreshold","PanicFleeResetHealth","HitboxSize","HitboxTransparency",
-        "BountyMinSingle","BountyMinTotal","BountyMaxPages","BountyScanTimeout",
+        "BountyMinBounty","BountyMaxPages","BountyScanTimeout",
         "BountyTeleportRetryWait","BountyPostTeleportWait","BountyMaxJoinAttempts","ListMode"
     }
 
@@ -2743,7 +2674,7 @@ do
         FlaggedRange = "FlaggedRange", FruitM1Range = "FruitRange", DragonGunRange = "DragonGunRange",
         MobBringRange = "BringRange", MobBringHold = "BringHold", OrbitRadius = "OrbitRadius", OrbitSpeed = "OrbitSpeed",
         DashLengthValue = "DashLengthVal", HitboxSize = "HitboxSize", HitboxTransparency = "HitboxTransparency",
-        BountyMinSingle = "BountyMinSingle", BountyMinTotal = "BountyMinTotal", BountyMaxPages = "BountyPages"
+        BountyMinBounty = "BountyMinBounty", BountyMaxPages = "BountyPages"
     }
 
     local LIST_MODE_LABELS = {
@@ -2813,9 +2744,7 @@ do
             end
         end)
 
-        -- NOTE: no Rayfield flag sync here on INIT — flag sync happens
-        -- post-load via the deferred task below to avoid touching
-        -- half-initialized UI elements (v3.10.2 crash cause)
+        -- NOTE: flag sync is deferred to INIT (post UI build) in v3.10.3+
         pcall(function()
             if Hub.RefreshListDropdowns then
                 pcall(Hub.RefreshListDropdowns)
@@ -3912,13 +3841,182 @@ do
 end
 
 -- ============================================================
---  UI | SERVER TAB (queued bounty hopper)
+--  UI | SERVER TAB (v3.11.0 — browser-remote bounty hopper)
 -- ============================================================
 do
-    local StoredJobID = ""
-    local BountyHopRunning = false
-    local HopQueue = {}
-    local JoinAttempts = {}
+    -- ============ HOPPER STATE ============
+    local HopAlive = true
+    local autoHopRunning = false
+    local autoHopRun = 0
+    local scanRun = 0
+    local scanResults = {}
+    local selectedJob = nil
+
+    local RegionList = { "Germany", "Netherlands", "United States", "Brazil", "Singapore", "Poland" }
+    local RegionEnabled = {
+        Germany = true,
+        Netherlands = true,
+        ["United States"] = false,
+        Brazil = false,
+        Singapore = false,
+        Poland = false,
+    }
+
+    -- ============ HOPPER HELPERS (ported from source) ============
+    local function getEnabledRegions()
+        local out = {}
+        for _, r in ipairs(RegionList) do
+            if RegionEnabled[r] then
+                table.insert(out, r)
+            end
+        end
+        return out
+    end
+
+    local function regionMatches(region, preferred)
+        local s = tostring(region or ""):lower()
+        for _, p in ipairs(preferred) do
+            if s:find(p:lower(), 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- parallel page-scan via the game's own browser remote —
+    -- every server's BOUNTY comes back pre-join (the big upgrade)
+    local function scanServers(minBounty)
+        local ok, browser = pcall(function()
+            return ReplicatedStorage:WaitForChild("__ServerBrowser", 10)
+        end)
+        if not ok or not browser then
+            Notify("Bounty Hop", "__ServerBrowser remote not found — remote may be patched", 6)
+            return nil
+        end
+
+        local found = {}
+        local done = 0
+        local pages = Hub.BountyMaxPages
+
+        for i = 1, pages do
+            task.spawn(function()
+                local okR, result = pcall(function()
+                    return browser:InvokeServer(i)
+                end)
+                if okR and type(result) == "table" then
+                    for jobId, info in pairs(result) do
+                        if (tonumber(info.Bounty) or 0) >= minBounty and jobId ~= game.JobId then
+                            info.Job = jobId
+                            table.insert(found, info)
+                        end
+                    end
+                end
+                done += 1
+            end)
+        end
+
+        local waited = 0
+        while done < pages and waited < Hub.BountyScanTimeout do
+            task.wait(0.1)
+            waited += 0.1
+        end
+
+        table.sort(found, function(a, b)
+            return (tonumber(a.Bounty) or 0) > (tonumber(b.Bounty) or 0)
+        end)
+        return found
+    end
+
+    -- scan, then sort preferred-region servers first, then by bounty
+    local function scanPreferred(preferred)
+        local list = scanServers(Hub.BountyMinBounty)
+        if not list then return nil end
+        for _, s in ipairs(list) do
+            s.Preferred = regionMatches(s.Region, preferred)
+        end
+        table.sort(list, function(a, b)
+            if a.Preferred ~= b.Preferred then
+                return a.Preferred
+            end
+            return (tonumber(a.Bounty) or 0) > (tonumber(b.Bounty) or 0)
+        end)
+        return list
+    end
+
+    -- teleport via the browser remote's native path (retry once)
+    local function joinServer(jobId)
+        local ok, browser = pcall(function()
+            return ReplicatedStorage:WaitForChild("__ServerBrowser", 10)
+        end)
+        if ok and browser then
+            pcall(function() browser:InvokeServer("teleport", jobId) end)
+            task.wait(Hub.BountyTeleportRetryWait)
+            pcall(function() browser:InvokeServer("teleport", jobId) end)
+            task.wait(Hub.BountyPostTeleportWait)
+        else
+            -- fallback: direct teleport
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, player)
+            end)
+            task.wait(Hub.BountyPostTeleportWait)
+        end
+    end
+
+    -- auto hop loop (ported — generation counters for clean cancel)
+    local function autoHop()
+        local regions = getEnabledRegions()
+        if #regions == 0 then
+            Notify("Bounty Hop", "No regions selected!", 3)
+            return
+        end
+
+        autoHopRun += 1
+        autoHopRunning = true
+        local myRun = autoHopRun
+
+        Notify("Bounty Hop",
+            ("Scanning for bounty >= %s (regions: %s)"):format(
+                formatCommas(Hub.BountyMinBounty), table.concat(regions, ", ")), 4)
+
+        local list = scanPreferred(regions)
+        if autoHopRun ~= myRun or not list then
+            autoHopRunning = false
+            return
+        end
+
+        Notify("Bounty Hop", ("Found %d candidate servers."):format(#list), 3)
+        if #list == 0 then
+            Notify("Bounty Hop", "No servers matched your bounty threshold.", 4)
+            autoHopRunning = false
+            return
+        end
+
+        for i, s in ipairs(list) do
+            if i > Hub.BountyMaxJoinAttempts then break end
+            print(("[BountyHop] %d. %s | %s | %sp | %s%s"):format(
+                i, tostring(s.Job), tostring(s.Region), tostring(s.Count),
+                formatCommas(s.Bounty), s.Preferred and " [preferred]" or ""))
+        end
+
+        for i, s in ipairs(list) do
+            if not autoHopRunning or autoHopRun ~= myRun then break end
+            Notify("Bounty Hop",
+                ("[%d/%d] Joining %s (%s, bounty %s)%s"):format(
+                    i, #list, tostring(s.Job), tostring(s.Region),
+                    formatCommas(s.Bounty), s.Preferred and " [preferred]" or ""), 3)
+            joinServer(s.Job)
+            if not autoHopRunning or autoHopRun ~= myRun then break end
+            Notify("Bounty Hop", "Still here — trying next server...", 2)
+        end
+
+        if autoHopRunning and autoHopRun == myRun then
+            Notify("Bounty Hop", "Exhausted all candidate servers.", 4)
+        end
+        autoHopRunning = false
+    end
+
+    -- ============ HOPPER UI ============
+    ServerTab:CreateSection("Copy / Join by Job ID")
 
     ServerTab:CreateButton({
         Name = "Copy Current Job ID",
@@ -3936,26 +4034,6 @@ do
         end
     })
 
-    ServerTab:CreateInput({
-        Name = "Job ID",
-        PlaceholderText = "paste job id here",
-        RemoveTextAfterFocusLost = false,
-        Callback = function(Text)
-            StoredJobID = Text
-        end
-    })
-
-    ServerTab:CreateButton({
-        Name = "Join Job ID",
-        Callback = function()
-            if not StoredJobID or StoredJobID == "" then
-                Notify("Server", "Enter a Job ID first", 3)
-                return
-            end
-            HopToServer(StoredJobID)
-        end
-    })
-
     ServerTab:CreateButton({
         Name = "Rejoin Server",
         Callback = function()
@@ -3966,216 +4044,151 @@ do
         end
     })
 
-    ServerTab:CreateButton({
-        Name = "Hop to Random Server",
-        Callback = function()
-            Notify("Server", "Fetching server list...", 2)
-            task.spawn(function()
-                local candidates = GetServerCandidates()
-                if #candidates > 0 then
-                    local pick = candidates[math.random(1, #candidates)]
-                    Notify("Server", "Hopping to server with " .. pick.playing .. " players", 2)
-                    HopToServer(pick.id)
-                else
-                    Notify("Server", "No servers found — check executor HTTP support", 4)
-                end
-            end)
-        end
-    })
+    ServerTab:CreateSection("Bounty Scanner (pre-join filter)")
 
-    ServerTab:CreateButton({
-        Name = "Hop to Least Players Server",
-        Callback = function()
-            Notify("Server", "Scanning for emptiest server...", 2)
-            task.spawn(function()
-                local candidates = GetServerCandidates()
-                if #candidates > 0 then
-                    table.sort(candidates, function(a, b) return a.playing < b.playing end)
-                    local best = candidates[1]
-                    Notify("Server", "Joining server with " .. best.playing .. " players", 2)
-                    HopToServer(best.id)
-                else
-                    Notify("Server", "No servers found", 4)
-                end
-            end)
-        end
-    })
+    local ScanStatusLabel = ServerTab:CreateLabel("Scan Status: Idle")
 
-    ServerTab:CreateSection("Bounty System")
-
-    ServerTab:CreateButton({
-        Name = "Show Current Server Bounty",
-        Callback = function()
-            local total, topName, topVal = GetCurrentServerBounty()
-            local count = #Players:GetPlayers()
-            Notify("Server Bounty",
-                string.format("Total: %s | %d players\nTop: %s (%s)",
-                    FormatBounty(total), count, topName, FormatBounty(topVal)),
-                6)
+    ServerTab:CreateInput({
+        Name = "Min Bounty",
+        PlaceholderText = "100000000",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(Text)
+            local num = tonumber(Text)
+            if num and num >= 0 then
+                Hub.BountyMinBounty = num
+            end
         end
     })
 
     ServerTab:CreateSlider({
-        Name = "Min Single-Player Bounty",
-        Range = {1000000, 500000000},
-        Increment = 1000000,
-        Suffix = "",
-        CurrentValue = 100000000,
-        Flag = "BountyMinSingle",
-        Callback = function(Value)
-            Hub.BountyMinSingle = Value
-        end
-    })
-
-    ServerTab:CreateSlider({
-        Name = "Min Server Total Bounty",
-        Range = {1000000, 500000000},
-        Increment = 1000000,
-        Suffix = "",
-        CurrentValue = 30000000,
-        Flag = "BountyMinTotal",
-        Callback = function(Value)
-            Hub.BountyMinTotal = Value
-        end
-    })
-
-    ServerTab:CreateSlider({
-        Name = "Queue Pages (100 servers each)",
+        Name = "Scan Pages (parallel browser calls)",
         Range = {1, 100},
-        Increment = 1,
+        Increment = 5,
         Suffix = "",
-        CurrentValue = 10,
+        CurrentValue = 20,
         Flag = "BountyPages",
         Callback = function(Value)
             Hub.BountyMaxPages = Value
         end
     })
 
-    ServerTab:CreateToggle({
-        Name = "Auto Bounty Hop (queued)",
+    local ServerListDropdown = ServerTab:CreateDropdown({
+        Name = "Scan Results (select to join)",
+        Options = {},
+        CurrentOption = {},
+        MultipleOptions = false,
+        Flag = "BountyScanResults",
+        Callback = function(Option)
+            local value = Option[1]
+            if type(value) == "string" and value ~= "" then
+                local idx = tonumber(value:match("^#(%d+)"))
+                if idx then
+                    local entry = scanResults[idx]
+                    if entry then
+                        selectedJob = entry.Job
+                    end
+                end
+            end
+        end
+    })
+
+    ServerTab:CreateButton({
+        Name = "Scan Servers",
+        Callback = function()
+            ScanStatusLabel:Set("Scan Status: Scanning...")
+            selectedJob = nil
+            scanResults = {}
+            scanRun += 1
+            local myScan = scanRun
+
+            task.spawn(function()
+                if not HopAlive then return end
+                local list = scanServers(Hub.BountyMinBounty)
+                if not HopAlive or scanRun ~= myScan then return end
+                if not list then
+                    ScanStatusLabel:Set("Scan Status: Remote unavailable")
+                    return
+                end
+
+                scanResults = list
+                local labels = {}
+                for i, s in ipairs(list) do
+                    local region = tostring(s.Region or "?"):match("^([^,]+)") or "?"
+                    labels[i] = ("#%d %s %sp %s"):format(i, region, tostring(s.Count or "?"), FormatBounty(s.Bounty))
+                end
+
+                ScanStatusLabel:Set("Scan Status: " .. (#list > 0 and ("Found " .. #list .. " servers") or "No servers found"))
+                if #labels > 0 then
+                    ServerListDropdown:Refresh(labels)
+                else
+                    ServerListDropdown:Refresh({})
+                end
+            end)
+        end
+    })
+
+    ServerTab:CreateButton({
+        Name = "Join Selected Server",
+        Callback = function()
+            if selectedJob then
+                Notify("Server", "Joining: " .. selectedJob, 3)
+                joinServer(selectedJob)
+            else
+                Notify("Server", "No server selected — scan and pick one first", 3)
+            end
+        end
+    })
+
+    ServerTab:CreateSection("Auto Hop (region filter)")
+
+    ServerTab:CreateDropdown({
+        Name = "Preferred Regions",
+        Options = RegionList,
+        CurrentOption = {"Germany", "Netherlands"},
+        MultipleOptions = true,
+        Flag = "BountyRegions",
+        Callback = function(Option)
+            for _, r in ipairs(RegionList) do
+                RegionEnabled[r] = false
+            end
+            if type(Option) == "table" then
+                for _, v in ipairs(Option) do
+                    if RegionEnabled[v] ~= nil then
+                        RegionEnabled[v] = true
+                    end
+                end
+            end
+        end
+    })
+
+    local AutoHopToggle = ServerTab:CreateToggle({
+        Name = "Auto Bounty Hop (browser remote)",
         CurrentValue = false,
         Flag = "BountyHop",
         Callback = function(Value)
-            BountyHopRunning = Value
             if Value then
-                HopQueue = {}
-                JoinAttempts = {}
-                Notify("Bounty Hop", "Started — hunting " .. FormatBounty(Hub.BountyMinSingle) .. "+ players", 4)
-                task.spawn(function()
-                    local function LoadHopQueue()
-                        HopQueue = {}
-                        local cursor = ""
-                        for page = 1, Hub.BountyMaxPages do
-                            local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
-                            local data = httpGetJson(url)
-                            if not data or not data.data then break end
-                            for _, s in ipairs(data.data) do
-                                if s.id ~= game.JobId and s.playing < s.maxPlayers then
-                                    table.insert(HopQueue, {id = s.id, playing = s.playing})
-                                end
-                            end
-                            cursor = data.nextPageCursor or ""
-                            if cursor == "" then break end
-                            task.wait(0.3)
-                        end
-                        for i = #HopQueue, 2, -1 do
-                            local j = math.random(i)
-                            HopQueue[i], HopQueue[j] = HopQueue[j], HopQueue[i]
-                        end
-                    end
-
-                    while BountyHopRunning do
-                        local waited = 0
-                        while BountyHopRunning and waited < 10 do
-                            local char = player.Character
-                            local data = player:FindFirstChild("Data")
-                            if char and char:FindFirstChild("HumanoidRootPart") and data then break end
-                            task.wait(1)
-                            waited = waited + 1
-                        end
-                        if not BountyHopRunning then break end
-
-                        task.wait(Hub.BountyPostTeleportWait)
-
-                        local scanDeadline = os.clock() + Hub.BountyScanTimeout
-                        local total, topName, topVal = 0, "None", 0
-                        while os.clock() < scanDeadline do
-                            total, topName, topVal = GetCurrentServerBounty()
-                            if total > 0 then break end
-                            task.wait(1)
-                        end
-
-                        Notify("Bounty Hop",
-                            string.format("Server: %s | Top: %s (%s)",
-                                FormatBounty(total), topName, FormatBounty(topVal)),
-                            4)
-
-                        if topVal >= Hub.BountyMinSingle or total >= Hub.BountyMinTotal then
-                            Notify("Bounty Hop", "TARGET FOUND — staying in this server!", 6)
-                            BountyHopRunning = false
-                            break
-                        end
-
-                        local picked = nil
-                        while #HopQueue > 0 do
-                            local c = table.remove(HopQueue)
-                            if (JoinAttempts[c.id] or 0) < Hub.BountyMaxJoinAttempts then
-                                picked = c
-                                break
-                            end
-                        end
-
-                        if not picked then
-                            Notify("Bounty Hop", "Queue empty — reloading pages...", 2)
-                            LoadHopQueue()
-                            while #HopQueue > 0 do
-                                local c = table.remove(HopQueue)
-                                if (JoinAttempts[c.id] or 0) < Hub.BountyMaxJoinAttempts then
-                                    picked = c
-                                    break
-                                end
-                            end
-                        end
-
-                        if not picked then
-                            Notify("Bounty Hop", "All attempts exhausted — rejoining", 3)
-                            pcall(function()
-                                TeleportService:Teleport(game.PlaceId)
-                            end)
-                            break
-                        end
-
-                        JoinAttempts[picked.id] = (JoinAttempts[picked.id] or 0) + 1
-                        local prevJob = game.JobId
-                        Notify("Bounty Hop", "Hopping to server (" .. picked.playing .. " players) — attempt " .. JoinAttempts[picked.id], 2)
-                        task.wait(0.5)
-                        pcall(function()
-                            TeleportService:TeleportToPlaceInstance(game.PlaceId, picked.id, player)
-                        end)
-
-                        local failWait = 0
-                        while BountyHopRunning and failWait < 6 do
-                            task.wait(1)
-                            failWait = failWait + 1
-                        end
-                        if BountyHopRunning and game.JobId == prevJob then
-                            Notify("Bounty Hop", "Join failed — retrying after cooldown", 2)
-                            task.wait(Hub.BountyTeleportRetryWait)
-                        end
-
-                        task.wait(1)
-                    end
-                end)
+                task.spawn(autoHop)
             else
+                autoHopRun += 1
+                autoHopRunning = false
                 Notify("Bounty Hop", "Stopped", 2)
             end
         end
     })
+
+    -- keep the toggle in sync if the hop exhausts itself
+    task.spawn(function()
+        while HopAlive do
+            task.wait(2)
+            if not autoHopRunning and AutoHopToggle.CurrentValue then
+                pcall(function() AutoHopToggle:Set(false) end)
+            end
+        end
+    end)
 end
 
 -- ============================================================
---  INITIALIZE DEFAULTS
---  (load saved values, DEFERRED flag-sync after UI fully built)
+--  INITIALIZE DEFAULTS (load saved config first, then start modules)
 -- ============================================================
 task.spawn(function()
     task.wait(0.3)
@@ -4194,7 +4207,7 @@ task.spawn(function()
             FlaggedRange = "FlaggedRange", FruitM1Range = "FruitRange", DragonGunRange = "DragonGunRange",
             MobBringRange = "BringRange", MobBringHold = "BringHold", OrbitRadius = "OrbitRadius", OrbitSpeed = "OrbitSpeed",
             DashLengthValue = "DashLengthVal", HitboxSize = "HitboxSize", HitboxTransparency = "HitboxTransparency",
-            BountyMinSingle = "BountyMinSingle", BountyMinTotal = "BountyMinTotal", BountyMaxPages = "BountyPages"
+            BountyMinBounty = "BountyMinBounty", BountyMaxPages = "BountyPages"
         }
         for key, flag in pairs(FLAG_SYNC) do
             local value = Config[key] or Hub[key]
@@ -4208,5 +4221,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.10.3 loaded — hook guarded", 3)
+    Notify("Alien Hub", "v3.11.0 loaded — browser hopper active", 3)
 end)
