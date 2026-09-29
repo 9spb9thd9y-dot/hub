@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.9.9 — compact quick actions v3)
+--  ALIEN HUB | Rayfield UI (v3.10.0 — panic flee overrides all)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -85,6 +85,7 @@ local Hub = {
     BountyMaxJoinAttempts = 10,
     ListMode = "Off",
     PlayerList = {},
+    FleeLock = false,
 }
 
 Hub.Net, Hub.RegisterAttack, Hub.RegisterHit, Hub.NetModule = nil, nil, nil, nil
@@ -112,7 +113,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.9.9 | initializing modules...",
+    LoadingSubtitle = "v3.10.0 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -494,7 +495,7 @@ end
 
 -- ============================================================
 --  FLY (mobile: joystick + hold ▲▼ | PC: WASD/Space/Ctrl)
---  cooperates with pursuit (releases physics when chasing)
+--  v3.10.0 — yields to pursuit AND flee lock
 -- ============================================================
 do
     local FlyConnection = nil
@@ -656,10 +657,11 @@ do
         FlyWanted = true
         SetFlyButtons(true)
         if Hub.PursuitActive and Hub.PursuitActive() then return end
+        if Hub.FleeLock then return end
 
         FlyConnection = RunService.RenderStepped:Connect(function(dt)
             if not Config.Fly then StopFly() return end
-            if Hub.PursuitActive and Hub.PursuitActive() then return end
+            if (Hub.PursuitActive and Hub.PursuitActive()) or Hub.FleeLock then return end
 
             local char = player.Character
             if not char then return end
@@ -967,7 +969,7 @@ do
 end
 
 -- ============================================================
---  DRAGON GUN M1 (v3.9.7 — sea beasts restored)
+--  DRAGON GUN M1 (sea beasts restored)
 -- ============================================================
 do
     local ShootGunEvent, Validator2, ShootFunction = nil, nil, nil
@@ -1452,7 +1454,7 @@ do
 end
 
 -- ============================================================
---  PANIC FLEE
+--  PANIC FLEE (v3.10.0 — SURVIVAL PRIORITY: overrides everything)
 -- ============================================================
 do
     local Armed = true
@@ -1477,6 +1479,19 @@ do
                         Armed = false
                         LastRun = os.clock()
 
+                        -- SURVIVAL PRIORITY: kill all competing movement systems
+                        Hub.FleeLock = true
+                        if Hub.StopTween then pcall(Hub.StopTween) end
+                        Config.TweenToPlayer = false
+                        Config.TweenToNearest = false
+                        pcall(function()
+                            if Rayfield.Flags and Rayfield.Flags.TweenPlayer then Rayfield.Flags.TweenPlayer:Set(false) end
+                            if Rayfield.Flags and Rayfield.Flags.TweenNearest then Rayfield.Flags.TweenNearest:Set(false) end
+                        end)
+                        if Hub.ActiveTween then Hub.ActiveTween:Cancel(); Hub.ActiveTween = nil end
+                        -- release fly physics so the flee tween owns velocity
+                        if Hub.ReleaseFlyPhysics then pcall(Hub.ReleaseFlyPhysics) end
+
                         local nearestHRP, nearestDist = nil, math.huge
                         for _, p in ipairs(Players:GetPlayers()) do
                             if p ~= player and p.Character then
@@ -1500,12 +1515,20 @@ do
                         local dest = hrp.Position + fleeDir * 2500
                         Notify("Panic Flee", "Low health — escaping! (" .. Count .. "/5)", 2)
 
-                        if Hub.ActiveTween then Hub.ActiveTween:Cancel(); Hub.ActiveTween = nil end
-                        TweenService:Create(
+                        local fleeTween = TweenService:Create(
                             hrp,
                             TweenInfo.new(math.max(0.5, 2500 / Hub.TweenSpeedVal), Enum.EasingStyle.Linear),
                             {CFrame = CFrame.new(dest)}
-                        ):Play()
+                        )
+                        fleeTween:Play()
+                        fleeTween.Completed:Connect(function()
+                            -- lock drops when the escape lands; nothing auto-resumes
+                            Hub.FleeLock = false
+                            -- restore fly physics if fly was wanted
+                            if Config.Fly and Hub.IsFlyWanted and Hub.IsFlyWanted() and Hub.AttachFlyPhysics then
+                                pcall(Hub.AttachFlyPhysics)
+                            end
+                        end)
 
                         if Count >= 5 then
                             Hub.PanicFleeEnabled = false
@@ -1521,8 +1544,19 @@ do
     end)
 end
 
+-- FLEE LOCK SAFETY: never stay locked across a death
+player.CharacterAdded:Connect(function()
+    task.wait(1)
+    if Hub.FleeLock then
+        Hub.FleeLock = false
+        if Config.Fly and Hub.IsFlyWanted and Hub.IsFlyWanted() and Hub.AttachFlyPhysics then
+            pcall(Hub.AttachFlyPhysics)
+        end
+    end
+end)
+
 -- ============================================================
---  MOVEMENT | SMOOTH PURSUIT (fly-aware, death-proof)
+--  MOVEMENT | SMOOTH PURSUIT (fly-aware, death-proof, flee-locked)
 -- ============================================================
 do
     local TweenConnection = nil
@@ -1572,6 +1606,8 @@ do
     end
 
     local function StartTween()
+        -- FLEE LOCK: survival wins — refuse to start while escaping
+        if Hub.FleeLock then return end
         StopTween()
         PursuitRunning = true
         SnapArmed = true
@@ -1579,6 +1615,10 @@ do
 
         TweenConnection = RunService.Heartbeat:Connect(function(dt)
             if not (Config.TweenToPlayer or Config.TweenToNearest) then
+                StopTween()
+                return
+            end
+            if Hub.FleeLock then
                 StopTween()
                 return
             end
@@ -4341,5 +4381,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.9.9 loaded — compact quick actions", 3)
+    Notify("Alien Hub", "v3.10.0 loaded — survival priority active", 3)
 end)
