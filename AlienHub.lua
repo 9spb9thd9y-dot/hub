@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.9 — register-limit restructure)
+--  ALIEN HUB | Rayfield UI (v3.9.2 — smooth pursuit, gun reverted)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -43,11 +43,10 @@ local Config = {
 --  HUB — shared mutable settings + feature functions
 -- ============================================================
 local Hub = {
-    -- numeric settings (UI sliders write these)
     TweenSpeedVal = 180,
     TeamCheckEnabled = false,
     MinTargetLevel = 2300,
-    InstaSnapDistance = 167,
+    InstaSnapDistance = 25,
     TweenRecalcThreshold = 25,
     TweenMaxRange = 20000,
     TweenXOffset = 0,
@@ -74,12 +73,9 @@ local Hub = {
     AntiLavaActive = false,
     DeleteShipActive = false,
     WalkOnWaterEnabled = false,
-    -- target selection
     SelectedPlayerName = nil,
     SelectedPlayerObj = nil,
-    -- tween state (panic flee cancels this too)
     ActiveTween = nil,
-    -- bounty hopper
     BountyMinSingle = 100000000,
     BountyMinTotal = 30000000,
     BountyMaxPages = 10,
@@ -89,11 +85,10 @@ local Hub = {
     BountyMaxJoinAttempts = 10,
 }
 
--- network cache lives in Hub (filled by block below)
 Hub.Net, Hub.RegisterAttack, Hub.RegisterHit, Hub.NetModule = nil, nil, nil, nil
 Hub.CommF, Hub.commE, Hub.MouseModule, Hub.Validator = nil, nil, nil, nil
 
-do -- NETWORK CACHE (timeouts — no infinite hang)
+do -- NETWORK CACHE
     local ModulesFolder = ReplicatedStorage:WaitForChild("Modules", 30)
     local Net = ModulesFolder and ModulesFolder:WaitForChild("Net", 30)
     Hub.Net = Net
@@ -115,7 +110,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.9 | initializing modules...",
+    LoadingSubtitle = "v3.9.2 | initializing modules...",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false
 })
@@ -267,7 +262,7 @@ local function IsAlly(targetPlayer)
 end
 
 -- ============================================================
---  SAFEZONE GEOMETRY + PVP STATE + TARGET FILTERS (scoped block)
+--  SAFEZONE GEOMETRY + PVP STATE + TARGET FILTERS
 -- ============================================================
 Hub.GetPVPState, Hub.IsInCombat, Hub.ShouldSkipPlayerTarget = nil, nil, nil
 
@@ -349,7 +344,6 @@ do
         return true
     end
 
-    -- level cache
     local LevelCache = {}
     Players.PlayerRemoving:Connect(function(p) LevelCache[p] = nil end)
 
@@ -383,7 +377,7 @@ do
 end
 
 -- ============================================================
---  PASSIVE BUFFS (anti-stun + antistun heartbeat + noclip)
+--  PASSIVE BUFFS
 -- ============================================================
 do
     local function SetupCharacter(char)
@@ -464,7 +458,7 @@ do
 end
 
 -- ============================================================
---  VALIDATOR WARMUP (fires on click/touch)
+--  VALIDATOR WARMUP
 -- ============================================================
 if Hub.Validator then
     UserInputService.InputBegan:Connect(function(input, gp)
@@ -572,7 +566,7 @@ do
 end
 
 -- ============================================================
---  AUTO HAKI & V4 (permanent loops — check Config flags)
+--  AUTO HAKI & V4 (permanent loops)
 -- ============================================================
 do
     task.spawn(function()
@@ -628,7 +622,7 @@ do
 end
 
 -- ============================================================
---  FLAGGED M1 (scoped block — cached seed, unified filters)
+--  FLAGGED M1 (cached seed, unified filters)
 -- ============================================================
 do
     local u4_flagged = nil
@@ -657,7 +651,6 @@ do
         end
     end
 
-    -- seed cache poll (their pattern)
     task.spawn(function()
         local seedRemote = Hub.Net and Hub.Net:FindFirstChild("seed")
         if seedRemote then
@@ -744,7 +737,7 @@ do
 end
 
 -- ============================================================
---  FRUIT AURA (scoped block)
+--  FRUIT AURA
 -- ============================================================
 do
     local function getFruit()
@@ -817,7 +810,7 @@ do
 end
 
 -- ============================================================
---  DRAGON GUN M1 (scoped block — full upgrade set)
+--  DRAGON GUN M1 (v3.9.2 — reverted to v3.7 proven core)
 -- ============================================================
 do
     local ShootGunEvent, Validator2, ShootFunction = nil, nil, nil
@@ -898,86 +891,34 @@ do
         return math.floor(v9 / v4 * 16777215), v7
     end
 
-    local R15HitParts = {
-        "Head", "UpperTorso", "LowerTorso",
-        "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
-        "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
-    }
-
-    local function PickRandomHitPart(model)
-        if not model then return nil end
-        local found = {}
-        for _, name in ipairs(R15HitParts) do
-            local part = model:FindFirstChild(name)
-            if part and part:IsA("BasePart") then
-                found[#found + 1] = part
-            end
-        end
-        if #found == 0 then
-            return model:FindFirstChild("HumanoidRootPart")
-        end
-        return found[math.random(1, #found)]
-    end
-
-    local function HasRubberFruit(plr)
-        local char = plr.Character
-        for _, container in ipairs({ plr:FindFirstChild("Backpack"), char }) do
-            if container then
-                for _, child in ipairs(container:GetChildren()) do
-                    if child:GetAttribute("WeaponType") ~= "Demon Fruit" then continue end
-                    local n = (child.Name:match("^([^-]+)") or child.Name):gsub("%d+$", ""):lower()
-                    if n:find("rubber") then return true end
-                end
-            end
-        end
-        return false
-    end
-
+    -- v3.7 targeting: closest HRP among mobs + players
     local function GetClosestDragonTarget(myHRP)
         local closest, dist = nil, Hub.DragonGunRange
         local myPos = myHRP.Position
 
+        local enemies = workspace:FindFirstChild("Enemies")
+        if enemies then
+            for _, enemy in pairs(enemies:GetChildren()) do
+                local hum = enemy:FindFirstChildOfClass("Humanoid")
+                local r = enemy:FindFirstChild("HumanoidRootPart")
+                if hum and hum.Health > 0 and r then
+                    local d = (r.Position - myPos).Magnitude
+                    if d < dist then dist = d; closest = r end
+                end
+            end
+        end
+
         for _, p in ipairs(Players:GetPlayers()) do
-            if p.Character and not Hub.ShouldSkipPlayerTarget(p) and not HasRubberFruit(p) then
+            if p ~= player and p.Character then
                 local hum = p.Character:FindFirstChild("Humanoid")
                 local r = p.Character:FindFirstChild("HumanoidRootPart")
                 if hum and hum.Health > 0 and r then
                     local d = (r.Position - myPos).Magnitude
-                    if d < dist then dist = d; closest = p.Character end
+                    if d < dist then dist = d; closest = r end
                 end
             end
         end
-
-        if not closest then
-            local seaBeasts = workspace:FindFirstChild("SeaBeasts")
-            if seaBeasts then
-                for _, beast in ipairs(seaBeasts:GetChildren()) do
-                    local r = beast:FindFirstChild("HumanoidRootPart")
-                    local health = beast:FindFirstChild("Health")
-                    if r and health and health:IsA("ValueBase") and health.Value > 0 then
-                        local d = (r.Position - myPos).Magnitude
-                        if d < dist then dist = d; closest = beast end
-                    end
-                end
-            end
-        end
-
-        if not closest then
-            local enemies = workspace:FindFirstChild("Enemies")
-            if enemies then
-                for _, enemy in pairs(enemies:GetChildren()) do
-                    local hum = enemy:FindFirstChildOfClass("Humanoid")
-                    local r = enemy:FindFirstChild("HumanoidRootPart")
-                    if hum and hum.Health > 0 and r then
-                        local d = (r.Position - myPos).Magnitude
-                        if d < dist then dist = d; closest = enemy end
-                    end
-                end
-            end
-        end
-
-        if not closest then return nil end
-        return PickRandomHitPart(closest)
+        return closest
     end
 
     task.spawn(function()
@@ -1012,7 +953,7 @@ do
 end
 
 -- ============================================================
---  MOB BRING v2 (scoped block — cycle system, hold & restore)
+--  MOB BRING v2 (cycle system, hold & restore)
 -- ============================================================
 do
     local Bring = {
@@ -1175,9 +1116,9 @@ do
 end
 
 -- ============================================================
---  MISC | ANTI LAVA + GHOST SHIP + WALK ON WATER (scoped blocks)
+--  ANTI LAVA + GHOST SHIP + WALK ON WATER
 -- ============================================================
-do -- anti lava: body CanTouch + lava deletion
+do
     RunService.Stepped:Connect(function(_, dt)
         if not Hub.AntiLavaActive then return end
         pcall(function()
@@ -1213,7 +1154,7 @@ do -- anti lava: body CanTouch + lava deletion
     end)
 end
 
-do -- ghost ship
+do
     task.spawn(function()
         while true do
             if Hub.DeleteShipActive then
@@ -1246,7 +1187,7 @@ do -- ghost ship
     end)
 end
 
-do -- walk on water
+do
     local WaterPart = nil
 
     local function GetWaterPart()
@@ -1281,7 +1222,7 @@ do -- walk on water
 end
 
 -- ============================================================
---  HITBOX EXPANDER (scoped block — permanent re-apply loop)
+--  HITBOX EXPANDER
 -- ============================================================
 do
     local OriginalSizes = {}
@@ -1331,7 +1272,7 @@ do
 end
 
 -- ============================================================
---  PANIC FLEE (scoped block — permanent loop, reads Hub flags)
+--  PANIC FLEE
 -- ============================================================
 do
     local Armed = true
@@ -1401,22 +1342,24 @@ do
 end
 
 -- ============================================================
---  HYBRID TWEEN (scoped block — snap < 167, tween beyond)
+--  MOVEMENT | SMOOTH PURSUIT (velocity chase — no recreation churn)
 -- ============================================================
 do
     local TweenConnection = nil
-    local LastTargetPos = Vector3.zero
-    local SnapPauseUntil = 0
+    local SnapArmed = true
 
     local function StopTween()
         if TweenConnection then TweenConnection:Disconnect(); TweenConnection = nil end
-        if Hub.ActiveTween then Hub.ActiveTween:Cancel(); Hub.ActiveTween = nil end
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end
     end
 
     local function GetNearestPlayerHRP(myHRP)
         local nearest = nil
         local nearestDist = math.huge
-
         for _, p in ipairs(Players:GetPlayers()) do
             if not Hub.ShouldSkipPlayerTarget(p) and not IsAlly(p) and p.Character then
                 if Hub.IsInCombat(p, p.Character) then
@@ -1437,15 +1380,16 @@ do
 
     local function StartTween()
         StopTween()
-        TweenConnection = RunService.Heartbeat:Connect(function()
+        SnapArmed = true
+        TweenConnection = RunService.Heartbeat:Connect(function(dt)
             if not (Config.TweenToPlayer or Config.TweenToNearest) then StopTween() return end
+            dt = math.min(dt, 0.1)
 
             local myChar = player.Character
             local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
             if not myHRP then return end
 
             local tHRP = nil
-
             if Config.TweenToPlayer then
                 local target = Hub.SelectedPlayerName and Players:FindFirstChild(Hub.SelectedPlayerName)
                 if target and target.Character then
@@ -1456,38 +1400,44 @@ do
             end
 
             if not tHRP then
-                if Hub.ActiveTween then Hub.ActiveTween:Cancel(); Hub.ActiveTween = nil end
+                myHRP.AssemblyLinearVelocity = Vector3.zero
                 return
             end
 
-            local dist = (myHRP.Position - tHRP.Position).Magnitude
-            if dist > Hub.TweenMaxRange then return end
+            local rawDist = (myHRP.Position - tHRP.Position).Magnitude
+            if rawDist > Hub.TweenMaxRange then return end
 
             local targetPos = (tHRP.CFrame * CFrame.new(Hub.TweenXOffset, Hub.TweenYOffset, Hub.TweenZOffset)).Position
 
-            if dist <= Hub.InstaSnapDistance then
-                if os.clock() >= SnapPauseUntil then
-                    if Hub.ActiveTween then Hub.ActiveTween:Cancel(); Hub.ActiveTween = nil end
-                    myHRP.CFrame = CFrame.new(targetPos)
-                    myHRP.AssemblyLinearVelocity = Vector3.zero
-                    SnapPauseUntil = os.clock() + 0.15
-                    LastTargetPos = targetPos
-                end
-            else
-                local needsRecreate = not Hub.ActiveTween
-                    or Hub.ActiveTween.PlaybackState ~= Enum.PlaybackState.Playing
-                    or (LastTargetPos - targetPos).Magnitude > Hub.TweenRecalcThreshold
+            local speed = Hub.TweenSpeedVal
+            local lookahead = math.min(0.3, rawDist / math.max(speed, 1))
+            local aimPos = targetPos + (tHRP.AssemblyLinearVelocity * lookahead)
 
-                if needsRecreate then
-                    if Hub.ActiveTween then Hub.ActiveTween:Cancel() end
-                    local targetVel = tHRP.AssemblyLinearVelocity
-                    local timeToArrive = math.max(0.01, dist / Hub.TweenSpeedVal)
-                    local predicted = targetPos + (targetVel * timeToArrive)
-                    myHRP.AssemblyLinearVelocity = Vector3.zero
-                    Hub.ActiveTween = TweenService:Create(myHRP, TweenInfo.new(timeToArrive, Enum.EasingStyle.Linear), {CFrame = CFrame.new(predicted)})
-                    Hub.ActiveTween:Play()
-                    LastTargetPos = targetPos
-                end
+            local toTarget = aimPos - myHRP.Position
+            local dist = toTarget.Magnitude
+
+            -- SNAP ZONE with hysteresis
+            if rawDist > Hub.InstaSnapDistance * 1.5 then
+                SnapArmed = true
+            end
+            if SnapArmed and dist <= Hub.InstaSnapDistance then
+                myHRP.CFrame = CFrame.new(aimPos)
+                myHRP.AssemblyLinearVelocity = Vector3.zero
+                SnapArmed = false
+                return
+            end
+
+            -- ease-out landing
+            if dist < 30 then
+                speed = math.max(speed * (dist / 30), 10)
+            end
+
+            local step = speed * dt
+            if step >= dist then
+                myHRP.CFrame = CFrame.new(aimPos)
+                myHRP.AssemblyLinearVelocity = Vector3.zero
+            else
+                myHRP.AssemblyLinearVelocity = (toTarget / dist) * speed
             end
         end)
     end
@@ -1497,9 +1447,9 @@ do
 end
 
 -- ============================================================
---  ORBIT + INF JUMP + DASH + ANIM REMOVAL (scoped blocks)
+--  ORBIT + INF JUMP + DASH + ANIM REMOVAL
 -- ============================================================
-do -- orbit
+do
     local OrbitEnabled = false
     local OrbitAngle = 0
     local OrbitConn = nil
@@ -1526,7 +1476,7 @@ do -- orbit
     end
 end
 
-do -- inf jump
+do
     UserInputService.JumpRequest:Connect(function()
         if Hub.InfJumpEnabled then
             local char = player.Character
@@ -1543,7 +1493,7 @@ do -- inf jump
     end)
 end
 
-do -- dash length
+do
     task.spawn(function()
         while true do
             task.wait(0.1)
@@ -1564,7 +1514,7 @@ do -- dash length
     end)
 end
 
-do -- remove animations
+do
     local ATTACK_KEYWORDS = {"attack","slash","punch","m1","combo","hit","tool","ability","skill","bullet","gun","sword","melee","fruit"}
 
     local function isAttackAnim(track)
@@ -1597,7 +1547,7 @@ do -- remove animations
 end
 
 -- ============================================================
---  ESP (scoped block — name/dist/level/bounty/pvp)
+--  ESP (name/dist/level/bounty/pvp)
 -- ============================================================
 do
     local ESPObjects = {}
@@ -1732,7 +1682,7 @@ do
 end
 
 -- ============================================================
---  SILENT AIM + PREDICTION (scoped block — biggest local consumer)
+--  SILENT AIM + PREDICTION
 -- ============================================================
 local SilentAimModule = {}
 
@@ -1747,7 +1697,6 @@ do
     local ZSkillorM1 = false
     local autoKenRunning = false
 
-    local renderConnection = nil
     local currentTool = nil
     local playersaimbot = nil
     local PlayersPosition = nil
@@ -2017,7 +1966,7 @@ do
         or (currentTool and currentTool.Name == "Portal-Portal")
     end
 
-    renderConnection = RunService.RenderStepped:Connect(function()
+    RunService.RenderStepped:Connect(function()
         local lpChar = player.Character
         if not lpChar then return end
         local lpHRP = lpChar:FindFirstChild("HumanoidRootPart")
@@ -2276,7 +2225,6 @@ do
     player.CharacterAdded:Connect(onCharacterAdded)
     if player.Character then onCharacterAdded(player.Character) end
 
-    -- module API (UI calls these — state stays private to this block)
     function SilentAimModule:SetPlayers(v)
         UserWantsplayerAim = v
         SilentAimPlayersEnabled = v
@@ -2321,7 +2269,7 @@ do
 end
 
 -- ============================================================
---  FPS BOOST (scoped)
+--  FPS BOOST
 -- ============================================================
 function Hub.ApplyFPSBoost()
     pcall(function()
@@ -2718,7 +2666,7 @@ MovementTab:CreateSlider({
 })
 
 MovementTab:CreateToggle({
-    Name = "Tween to Selected Player (Hybrid)",
+    Name = "Tween to Selected Player (Smooth Pursuit)",
     CurrentValue = false,
     Flag = "TweenPlayer",
     Callback = function(Value)
@@ -2726,7 +2674,7 @@ MovementTab:CreateToggle({
         if Value then
             Config.TweenToNearest = false
             Hub.StartTween()
-            Notify("Tween", "Hybrid targeting selected player", 2)
+            Notify("Tween", "Pursuing selected player", 2)
         else
             Hub.StopTween()
             Notify("Tween Player", "Disabled", 2)
@@ -2735,7 +2683,7 @@ MovementTab:CreateToggle({
 })
 
 MovementTab:CreateToggle({
-    Name = "Tween to Nearest (PVP Only, Hybrid)",
+    Name = "Tween to Nearest (PVP Only, Smooth Pursuit)",
     CurrentValue = false,
     Flag = "TweenNearest",
     Callback = function(Value)
@@ -2743,7 +2691,7 @@ MovementTab:CreateToggle({
         if Value then
             Config.TweenToPlayer = false
             Hub.StartTween()
-            Notify("Tween", "Hybrid targeting nearest combatant", 2)
+            Notify("Tween", "Pursuing nearest combatant", 2)
         else
             Hub.StopTween()
             Notify("Tween Nearest", "Disabled", 2)
@@ -2752,11 +2700,11 @@ MovementTab:CreateToggle({
 })
 
 MovementTab:CreateSlider({
-    Name = "Insta-Snap Distance (under = instant)",
-    Range = {0, 500},
-    Increment = 10,
+    Name = "Snap Distance (final approach)",
+    Range = {0, 100},
+    Increment = 5,
     Suffix = "studs",
-    CurrentValue = 167,
+    CurrentValue = 25,
     Flag = "InstaSnap",
     Callback = function(Value)
         Hub.InstaSnapDistance = Value
@@ -2982,7 +2930,7 @@ VisualTab:CreateButton({
 })
 
 -- ============================================================
---  UI | PLAYERS TAB (scoped block)
+--  UI | PLAYERS TAB
 -- ============================================================
 do
     local playerNames = {}
@@ -3048,7 +2996,7 @@ do
 end
 
 -- ============================================================
---  UI | TELEPORTS TAB (scoped block)
+--  UI | TELEPORTS TAB
 -- ============================================================
 do
     local islandNames = {}
@@ -3201,7 +3149,7 @@ do
 end
 
 -- ============================================================
---  UI | RACES TAB (scoped block)
+--  UI | RACES TAB
 -- ============================================================
 do
     local raceOptions = {"Human", "Skypiea", "FishMan", "Mink"}
@@ -3292,7 +3240,7 @@ do
 end
 
 -- ============================================================
---  UI | SERVER TAB (scoped block — queued bounty hopper)
+--  UI | SERVER TAB (queued bounty hopper)
 -- ============================================================
 do
     local StoredJobID = ""
@@ -3560,5 +3508,5 @@ task.spawn(function()
     task.wait(0.5)
     Hub.StartFly()
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.9 loaded — all modules active", 3)
+    Notify("Alien Hub", "v3.9.2 loaded — smooth pursuit + reverted gun", 3)
 end)
