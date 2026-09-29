@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.10.2 — config diagnostics)
+--  ALIEN HUB | Rayfield UI (v3.10.1 — silent aim fix, smart pursuit)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -114,7 +114,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.10.2 | initializing modules...",
+    LoadingSubtitle = "v3.10.1 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -726,7 +726,7 @@ do
 end
 
 -- ============================================================
---  AUTO HAKI & V4 (95% gate + CommF_ fallback)
+--  AUTO HAKI & V4 (v3.10.1 — 95% gate + CommF_ fallback)
 -- ============================================================
 do
     task.spawn(function()
@@ -760,6 +760,7 @@ do
                             end
                         end
                         if not fired and Hub.CommF then
+                            -- fallback: the game's own awakening remote (from source script)
                             pcall(function() Hub.CommF:InvokeServer("Awakening", true) end)
                         end
                     end
@@ -1137,7 +1138,7 @@ do
 end
 
 -- ============================================================
---  MOB BRING v2 (ownership re-assert every tick, -8 grab)
+--  MOB BRING v2 (v3.10.1 — ownership re-assert every tick, -8 grab)
 -- ============================================================
 do
     local Bring = {
@@ -1567,7 +1568,7 @@ player.CharacterAdded:Connect(function()
 end)
 
 -- ============================================================
---  MOVEMENT | SMOOTH PURSUIT (fly-aware, flee-locked, max-range)
+--  MOVEMENT | SMOOTH PURSUIT (v3.10.1 — max range filter)
 -- ============================================================
 do
     local TweenConnection = nil
@@ -1937,7 +1938,7 @@ do
 end
 
 -- ============================================================
---  SILENT AIM + PREDICTION (IsA hook fix, perf-gated sampler)
+--  SILENT AIM + PREDICTION (v3.10.1 — IsA hook fix, perf-gated sampler)
 -- ============================================================
 local SilentAimModule = {}
 
@@ -1981,7 +1982,7 @@ do
         return buf
     end
 
-    -- sampler only runs while prediction is ON
+    -- sampler only runs while prediction is ON (perf + battery friendly)
     task.spawn(function()
         while true do
             if PredictionEnabled then
@@ -2691,11 +2692,10 @@ function Hub.ApplyFPSBoost()
 end
 
 -- ============================================================
---  CONFIG PERSISTENCE v2 (diagnostics + visible failures)
+--  CONFIG PERSISTENCE (custom — settings + player list survive)
 -- ============================================================
 do
     local SAVE_FILE = "AlienHub_Settings.json"
-    local LastSaveError = nil
 
     local CONFIG_KEYS = {"Fly","AutoHaki","AutoV4","FlaggedM1","FruitM1","TweenToPlayer","TweenToNearest","ESP","NoClip","AntiStun","IceWater"}
 
@@ -2730,7 +2730,7 @@ do
 
     function Hub.SaveHubConfig(silent)
         local ok, err = pcall(function()
-            if not writefile then error("writefile missing on this executor") end
+            if not writefile then error("no writefile") end
             local data = { config = {}, hub = {}, list = {} }
             for _, k in ipairs(CONFIG_KEYS) do
                 data.config[k] = Config[k]
@@ -2745,12 +2745,11 @@ do
             end
             writefile(SAVE_FILE, HttpService:JSONEncode(data))
         end)
-        LastSaveError = ok and nil or tostring(err)
         if not silent then
             if ok then
                 Notify("Config", "Settings saved", 2)
             else
-                Notify("Config", "SAVE FAILED: " .. LastSaveError, 5)
+                Notify("Config", "Save failed — executor lacks writefile", 3)
             end
         end
         return ok
@@ -2758,15 +2757,10 @@ do
 
     function Hub.LoadHubConfig()
         local ok, data = pcall(function()
-            if not readfile or not isfile then return nil, "readfile/isfile missing" end
-            if not isfile(SAVE_FILE) then return nil, "no save file" end
-            return HttpService:JSONDecode(readfile(SAVE_FILE)), nil
+            if not readfile or not isfile or not isfile(SAVE_FILE) then return nil end
+            return HttpService:JSONDecode(readfile(SAVE_FILE))
         end)
-        local loadErr = select(2, ok, data)
-        if not ok or type(data) ~= "table" then
-            if loadErr then LastSaveError = "load: " .. tostring(loadErr) end
-            return false
-        end
+        if not ok or type(data) ~= "table" then return false end
 
         pcall(function()
             if data.config then
@@ -2817,37 +2811,11 @@ do
         Notify("Config", "Saved settings erased — defaults on next load", 3)
     end
 
-    -- CONFIG STATUS: tells us exactly where the chain breaks
-    function Hub.ConfigStatus()
-        local lines = {}
-        lines[#lines + 1] = "writefile: " .. (writefile and "YES" or "NO")
-        lines[#lines + 1] = "readfile: " .. (readfile and "YES" or "NO")
-        lines[#lines + 1] = "isfile: " .. (isfile and "YES" or "NO")
-        local exists = false
-        pcall(function() exists = isfile and isfile(SAVE_FILE) or false end)
-        lines[#lines + 1] = "save file exists: " .. (exists and "YES" or "NO")
-        if exists then
-            pcall(function()
-                local content = readfile(SAVE_FILE)
-                lines[#lines + 1] = "file size: " .. #content .. " bytes"
-                local okDecode = pcall(function() HttpService:JSONDecode(content) end)
-                lines[#lines + 1] = "file valid JSON: " .. (okDecode and "YES" or "NO")
-            end)
-        end
-        lines[#lines + 1] = "last error: " .. (LastSaveError or "none")
-        Notify("Config Status", table.concat(lines, "\n"), 10)
-    end
-
-    -- autosave every 30s — ONE visible failure notice (not spam)
-    local autosaveFailNotified = false
+    -- autosave every 30s
     task.spawn(function()
         while true do
             task.wait(30)
-            local ok = Hub.SaveHubConfig(true)
-            if not ok and not autosaveFailNotified then
-                autosaveFailNotified = true
-                Notify("Config", "Autosave failing: " .. (LastSaveError or "unknown") .. " — check Config Status button", 6)
-            end
+            Hub.SaveHubConfig(true)
         end
     end)
 end
@@ -2896,13 +2864,6 @@ MainTab:CreateButton({
     Name = "Reset Saved Config",
     Callback = function()
         Hub.ResetHubConfig()
-    end
-})
-
-MainTab:CreateButton({
-    Name = "Config Status (diagnostics)",
-    Callback = function()
-        Hub.ConfigStatus()
     end
 })
 
@@ -4170,5 +4131,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.10.2 loaded — config diagnostics ready", 3)
+    Notify("Alien Hub", "v3.10.1 loaded — bugfix pass complete", 3)
 end)
