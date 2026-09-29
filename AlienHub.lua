@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.9.7 — sea beasts, config persistence)
+--  ALIEN HUB | Rayfield UI (v3.9.8 — thumb-zone quick actions)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -112,7 +112,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.9.7 | initializing modules...",
+    LoadingSubtitle = "v3.9.8 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -1048,7 +1048,7 @@ do
         return math.floor(v9 / v4 * 16777215), v7
     end
 
-    -- v3.9.7: players → sea beasts → mobs (priority from source)
+    -- players → sea beasts → mobs (priority from source)
     local function GetClosestDragonTarget(myHRP)
         local closest, dist = nil, Hub.DragonGunRange
         local myPos = myHRP.Position
@@ -2578,7 +2578,7 @@ do
 end
 
 -- ============================================================
---  MOBILE | QUICK ACTIONS (collapsed pill → dropdown stack)
+--  MOBILE | QUICK ACTIONS v2 (thumb-zone FAB, expand-up, outside-close)
 -- ============================================================
 do
     if UserInputService.TouchEnabled then
@@ -2593,41 +2593,76 @@ do
             PanelGui.Parent = player:WaitForChild("PlayerGui")
         end
 
-        local panel = Instance.new("Frame")
-        panel.Name = "Panel"
-        panel.Size = UDim2.new(0, 92, 0, 30)
-        panel.Position = UDim2.new(1, -102, 0.22, 0)
-        panel.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
-        panel.BackgroundTransparency = 0.3
-        panel.BorderSizePixel = 0
-        panel.Active = true
-        panel.Parent = PanelGui
+        -- container anchored bottom-right; grows UPWARD when expanded
+        local container = Instance.new("Frame")
+        container.Name = "Container"
+        container.AnchorPoint = Vector2.new(1, 1)
+        container.Position = UDim2.new(1, -14, 1, -320)
+        container.Size = UDim2.new(0, 56, 0, 56)
+        container.BackgroundTransparency = 1
+        container.Active = true
+        container.Parent = PanelGui
 
-        local pc = Instance.new("UICorner")
-        pc.CornerRadius = UDim.new(0, 10)
-        pc.Parent = panel
-        local ps = Instance.new("UIStroke")
-        ps.Color = Color3.fromRGB(0, 200, 255)
-        ps.Thickness = 1.5
-        ps.Transparency = 0.4
-        ps.Parent = panel
+        -- expanded background panel
+        local back = Instance.new("Frame")
+        back.Name = "Back"
+        back.Visible = false
+        back.Position = UDim2.new(0, 0, 0, 0)
+        back.Size = UDim2.new(0, 180, 0, 374)
+        back.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
+        back.BackgroundTransparency = 0.2
+        back.BorderSizePixel = 0
+        back.Parent = container
+        back.ZIndex = 2
 
-        local rows = Instance.new("Frame")
-        rows.Name = "Rows"
-        rows.Size = UDim2.new(1, 0, 0, 0)
-        rows.Position = UDim2.new(0, 0, 1, 4)
-        rows.BackgroundTransparency = 1
-        rows.Visible = false
-        rows.Parent = panel
+        local bc = Instance.new("UICorner")
+        bc.CornerRadius = UDim.new(0, 14)
+        bc.Parent = back
+        local bs = Instance.new("UIStroke")
+        bs.Color = Color3.fromRGB(0, 200, 255)
+        bs.Thickness = 1.5
+        bs.Transparency = 0.35
+        bs.Parent = back
+
+        local backPad = Instance.new("UIPadding")
+        backPad.PaddingTop = UDim.new(0, 8)
+        backPad.PaddingBottom = UDim.new(0, 8)
+        backPad.PaddingLeft = UDim.new(0, 6)
+        backPad.PaddingRight = UDim.new(0, 6)
+        backPad.Parent = back
 
         local rlayout = Instance.new("UIListLayout")
-        rlayout.Padding = UDim.new(0, 4)
-        rlayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        rlayout.Padding = UDim.new(0, 6)
         rlayout.SortOrder = Enum.SortOrder.LayoutOrder
-        rlayout.Parent = rows
+        rlayout.Parent = back
+
+        -- FAB (always visible, bottom of container)
+        local fab = Instance.new("TextButton")
+        fab.Name = "FAB"
+        fab.AnchorPoint = Vector2.new(0.5, 1)
+        fab.Position = UDim2.new(0.5, 0, 1, -2)
+        fab.Size = UDim2.new(0, 56, 0, 56)
+        fab.BackgroundColor3 = Color3.fromRGB(0, 90, 120)
+        fab.BackgroundTransparency = 0.15
+        fab.Text = "⚡ 0"
+        fab.TextColor3 = Color3.fromRGB(220, 250, 255)
+        fab.TextSize = 17
+        fab.Font = Enum.Font.GothamBlack
+        fab.AutoButtonColor = false
+        fab.BorderSizePixel = 0
+        fab.Parent = container
+        fab.ZIndex = 3
+
+        local fc = Instance.new("UICorner")
+        fc.CornerRadius = UDim.new(1, 0)
+        fc.Parent = fab
+        local fs = Instance.new("UIStroke")
+        fs.Color = Color3.fromRGB(0, 255, 255)
+        fs.Thickness = 2
+        fs.Transparency = 0.25
+        fs.Parent = fab
 
         local expanded = false
-        local openCount = 0
 
         local function SetRayfieldFlag(flag, value)
             pcall(function()
@@ -2640,23 +2675,24 @@ do
 
         local function makeToggle(label, getter, setter, flag)
             local b = Instance.new("TextButton")
-            b.Size = UDim2.new(0, 92, 0, 28)
+            b.Size = UDim2.new(1, 0, 0, 46)
             b.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-            b.Text = label .. ": ?"
+            b.Text = label .. "  ·  ?"
             b.TextColor3 = Color3.fromRGB(255, 255, 255)
-            b.TextSize = 12
+            b.TextSize = 14
             b.Font = Enum.Font.GothamBold
             b.AutoButtonColor = false
             b.BorderSizePixel = 0
-            b.Parent = rows
+            b.Parent = back
+            b.ZIndex = 3
             local bc = Instance.new("UICorner")
-            bc.CornerRadius = UDim.new(0, 8)
+            bc.CornerRadius = UDim.new(0, 10)
             bc.Parent = b
 
             local function refresh()
                 local on = getter()
-                b.Text = label .. ": " .. (on and "ON" or "OFF")
-                b.BackgroundColor3 = on and Color3.fromRGB(20, 110, 60) or Color3.fromRGB(90, 30, 30)
+                b.Text = label .. "  ·  " .. (on and "ON" or "OFF")
+                b.BackgroundColor3 = on and Color3.fromRGB(22, 120, 64) or Color3.fromRGB(95, 32, 32)
             end
 
             b.Activated:Connect(function()
@@ -2665,24 +2701,8 @@ do
             end)
 
             refresh()
-            openCount = openCount + 1
             return b
         end
-
-        local header = Instance.new("TextButton")
-        header.Size = UDim2.new(1, 0, 1, 0)
-        header.BackgroundColor3 = Color3.fromRGB(0, 90, 120)
-        header.BackgroundTransparency = 0.15
-        header.Text = "⚡ 0"
-        header.TextColor3 = Color3.fromRGB(220, 250, 255)
-        header.TextSize = 13
-        header.Font = Enum.Font.GothamBold
-        header.AutoButtonColor = false
-        header.BorderSizePixel = 0
-        header.Parent = panel
-        local hc = Instance.new("UICorner")
-        hc.CornerRadius = UDim.new(0, 10)
-        hc.Parent = header
 
         local function updateHeaderText()
             local active = 0
@@ -2693,9 +2713,10 @@ do
             if Config.FruitM1 then active = active + 1 end
             if Hub.DragonGunEnabled then active = active + 1 end
             if Hub.IsMobBringEnabled and Hub.IsMobBringEnabled() then active = active + 1 end
-            header.Text = expanded and "⚡ CLOSE" or ("⚡ " .. active)
+            fab.Text = expanded and "✕" or ("⚡ " .. active)
         end
 
+        -- ============ COMBAT TOGGLES ============
         makeToggle("Pursue", function()
             return Config.TweenToNearest
         end, function(v)
@@ -2750,40 +2771,29 @@ do
             if v then Hub.StartMobBring() else Hub.StopMobBring() end
         end, "BringNPC")
 
+        -- expand / collapse (container grows upward, bottom edge stays fixed)
         local function SetExpanded(state)
             expanded = state
-            rows.Visible = state
+            back.Visible = state
             if state then
-                panel.Size = UDim2.new(0, 92, 0, 30 + openCount * 32 + 4)
+                container.Size = UDim2.new(0, 180, 0, 374 + 62)
             else
-                panel.Size = UDim2.new(0, 92, 0, 30)
+                container.Size = UDim2.new(0, 56, 0, 56)
             end
             updateHeaderText()
         end
 
-        header.Activated:Connect(function()
-            SetExpanded(not expanded)
-        end)
-
-        task.spawn(function()
-            while true do
-                task.wait(2)
-                if not expanded then
-                    updateHeaderText()
-                end
-            end
-        end)
-
+        -- FAB: tap = toggle, hold-drag = move (6px threshold)
         local dragging = false
         local moved = false
         local dragStart, startPos
-        header.InputBegan:Connect(function(input)
+        fab.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.Touch
             or input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = true
                 moved = false
                 dragStart = input.Position
-                startPos = panel.Position
+                startPos = container.Position
                 input.Changed:Connect(function()
                     if input.UserInputState == Enum.UserInputState.End then
                         dragging = false
@@ -2799,13 +2809,48 @@ do
                     moved = true
                 end
                 if moved then
-                    panel.Position = UDim2.new(
+                    container.Position = UDim2.new(
                         startPos.X.Scale, startPos.X.Offset + delta.X,
                         startPos.Y.Scale, startPos.Y.Offset + delta.Y
                     )
                 end
             end
         end)
+        fab.Activated:Connect(function()
+            if not moved then
+                SetExpanded(not expanded)
+            end
+        end)
+
+        -- tap outside closes (mobile QoL)
+        UserInputService.InputBegan:Connect(function(input, gp)
+            if not expanded then return end
+            if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                return
+            end
+            local pos = input.Position
+            local inset = game:GetService("GuiService"):GetGuiInset()
+            local absPos = container.AbsolutePosition
+            local absSize = container.AbsoluteSize
+            local withinX = pos.X >= absPos.X and pos.X <= absPos.X + absSize.X
+            local withinY = pos.Y >= absPos.Y + inset.Y and pos.Y <= absPos.Y + inset.Y + absSize.Y
+            if not (withinX and withinY) then
+                SetExpanded(false)
+            end
+        end)
+
+        -- badge refresh
+        task.spawn(function()
+            while true do
+                task.wait(2)
+                if not expanded then
+                    updateHeaderText()
+                end
+            end
+        end)
+
+        updateHeaderText()
     end
 end
 
@@ -4295,5 +4340,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.9.7 loaded — config persistence active", 3)
+    Notify("Alien Hub", "v3.9.8 loaded — thumb-zone quick actions", 3)
 end)
