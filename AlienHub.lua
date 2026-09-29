@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.10.0 — panic flee overrides all)
+--  ALIEN HUB | Rayfield UI (v3.10.2 — config diagnostics)
 -- ============================================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -45,7 +45,8 @@ local Config = {
 local Hub = {
     TweenSpeedVal = 180,
     TeamCheckEnabled = false,
-    MinTargetLevel = 2300,
+    MinTargetLevel = 0,
+    PursuitMaxRange = 2500,
     InstaSnapDistance = 25,
     TweenRecalcThreshold = 25,
     TweenMaxRange = 20000,
@@ -108,12 +109,12 @@ do -- NETWORK CACHE
 end
 
 -- ============================================================
---  WINDOW (rayfield saver OFF — custom persistence replaces it)
+--  WINDOW
 -- ============================================================
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.10.0 | initializing modules...",
+    LoadingSubtitle = "v3.10.2 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -495,7 +496,7 @@ end
 
 -- ============================================================
 --  FLY (mobile: joystick + hold ▲▼ | PC: WASD/Space/Ctrl)
---  v3.10.0 — yields to pursuit AND flee lock
+--  cooperates with pursuit + flee lock
 -- ============================================================
 do
     local FlyConnection = nil
@@ -725,7 +726,7 @@ do
 end
 
 -- ============================================================
---  AUTO HAKI & V4 (permanent loops)
+--  AUTO HAKI & V4 (95% gate + CommF_ fallback)
 -- ============================================================
 do
     task.spawn(function()
@@ -742,19 +743,24 @@ do
 
     task.spawn(function()
         while true do
-            task.wait(0.4)
+            task.wait(1)
             if Config.AutoV4 then
                 local char = player.Character
                 if char then
                     local raceEnergy = char:GetAttribute("RaceEnergy")
-                    local energyOK = (raceEnergy == nil) or (raceEnergy >= 100)
+                    local energyOK = (raceEnergy == nil) or (raceEnergy >= 95)
                     if energyOK then
+                        local fired = false
                         local tool = char:FindFirstChild("Awakening") or player.Backpack:FindFirstChild("Awakening")
                         if tool then
                             local remote = tool:FindFirstChildWhichIsA("RemoteFunction")
                             if remote then
                                 pcall(function() remote:InvokeServer(true) end)
+                                fired = true
                             end
+                        end
+                        if not fired and Hub.CommF then
+                            pcall(function() Hub.CommF:InvokeServer("Awakening", true) end)
                         end
                     end
                 end
@@ -1131,7 +1137,7 @@ do
 end
 
 -- ============================================================
---  MOB BRING v2 (cycle system, hold & restore)
+--  MOB BRING v2 (ownership re-assert every tick, -8 grab)
 -- ============================================================
 do
     local Bring = {
@@ -1228,6 +1234,12 @@ do
         local now = os.clock()
         MobPrune(now)
 
+        -- re-assert ownership EVERY tick — the server re-evaluates it constantly
+        pcall(function()
+            player.SimulationRadius = math.huge
+            player.MaximumSimulationRadius = math.huge
+        end)
+
         for part, cycle in pairs(Bring.Cycles) do
             if now - cycle.StartedAt >= Hub.MobBringHold then
                 MobReturnCycle(part, cycle)
@@ -1238,7 +1250,8 @@ do
         local enemies = workspace:FindFirstChild("Enemies")
         if not character or not enemies then return end
 
-        local grabCFrame = character.CFrame * CFrame.new(0, -15, 0)
+        -- grab point: 8 studs below (less terrain clipping than -15)
+        local grabCFrame = character.CFrame * CFrame.new(0, -8, 0)
 
         for _, Enemy in ipairs(enemies:GetChildren()) do
             local hum = Enemy:FindFirstChildOfClass("Humanoid")
@@ -1283,6 +1296,7 @@ do
         local gen = Bring.Generation
         pcall(function()
             sethiddenproperty(player, "SimulationRadius", math.huge)
+            player.MaximumSimulationRadius = math.huge
         end)
         BringThread = task.spawn(function()
             while Bring.Enabled and Bring.Generation == gen do
@@ -1454,7 +1468,7 @@ do
 end
 
 -- ============================================================
---  PANIC FLEE (v3.10.0 — SURVIVAL PRIORITY: overrides everything)
+--  PANIC FLEE (survival priority — overrides everything)
 -- ============================================================
 do
     local Armed = true
@@ -1489,7 +1503,6 @@ do
                             if Rayfield.Flags and Rayfield.Flags.TweenNearest then Rayfield.Flags.TweenNearest:Set(false) end
                         end)
                         if Hub.ActiveTween then Hub.ActiveTween:Cancel(); Hub.ActiveTween = nil end
-                        -- release fly physics so the flee tween owns velocity
                         if Hub.ReleaseFlyPhysics then pcall(Hub.ReleaseFlyPhysics) end
 
                         local nearestHRP, nearestDist = nil, math.huge
@@ -1522,9 +1535,7 @@ do
                         )
                         fleeTween:Play()
                         fleeTween.Completed:Connect(function()
-                            -- lock drops when the escape lands; nothing auto-resumes
                             Hub.FleeLock = false
-                            -- restore fly physics if fly was wanted
                             if Config.Fly and Hub.IsFlyWanted and Hub.IsFlyWanted() and Hub.AttachFlyPhysics then
                                 pcall(Hub.AttachFlyPhysics)
                             end
@@ -1556,7 +1567,7 @@ player.CharacterAdded:Connect(function()
 end)
 
 -- ============================================================
---  MOVEMENT | SMOOTH PURSUIT (fly-aware, death-proof, flee-locked)
+--  MOVEMENT | SMOOTH PURSUIT (fly-aware, flee-locked, max-range)
 -- ============================================================
 do
     local TweenConnection = nil
@@ -1594,7 +1605,7 @@ do
                     local hrp = p.Character:FindFirstChild("HumanoidRootPart")
                     if hum and hrp and hum.Health > 0 then
                         local dist = (hrp.Position - myHRP.Position).Magnitude
-                        if dist < nearestDist then
+                        if dist < nearestDist and dist <= Hub.PursuitMaxRange then
                             nearestDist = dist
                             nearest = hrp
                         end
@@ -1926,7 +1937,7 @@ do
 end
 
 -- ============================================================
---  SILENT AIM + PREDICTION
+--  SILENT AIM + PREDICTION (IsA hook fix, perf-gated sampler)
 -- ============================================================
 local SilentAimModule = {}
 
@@ -1970,34 +1981,37 @@ do
         return buf
     end
 
+    -- sampler only runs while prediction is ON
     task.spawn(function()
         while true do
-            task.wait(PredictionSampleInterval)
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= player and p.Character then
-                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local buf = GetPredictionBuffer(hrp)
-                        buf.head = (buf.head % buf.capacity) + 1
-                        buf.positions[buf.head] = hrp.Position
-                        buf.timestamps[buf.head] = os.clock()
-                        buf.count = math.min(buf.count + 1, buf.capacity)
+            if PredictionEnabled then
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= player and p.Character then
+                        local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            local buf = GetPredictionBuffer(hrp)
+                            buf.head = (buf.head % buf.capacity) + 1
+                            buf.positions[buf.head] = hrp.Position
+                            buf.timestamps[buf.head] = os.clock()
+                            buf.count = math.min(buf.count + 1, buf.capacity)
+                        end
+                    end
+                end
+                local enemies = workspace:FindFirstChild("Enemies")
+                if enemies then
+                    for _, npc in ipairs(enemies:GetChildren()) do
+                        local hrp = npc:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            local buf = GetPredictionBuffer(hrp)
+                            buf.head = (buf.head % buf.capacity) + 1
+                            buf.positions[buf.head] = hrp.Position
+                            buf.timestamps[buf.head] = os.clock()
+                            buf.count = math.min(buf.count + 1, buf.capacity)
+                        end
                     end
                 end
             end
-            local enemies = workspace:FindFirstChild("Enemies")
-            if enemies then
-                for _, npc in ipairs(enemies:GetChildren()) do
-                    local hrp = npc:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local buf = GetPredictionBuffer(hrp)
-                        buf.head = (buf.head % buf.capacity) + 1
-                        buf.positions[buf.head] = hrp.Position
-                        buf.timestamps[buf.head] = os.clock()
-                        buf.count = math.min(buf.count + 1, buf.capacity)
-                    end
-                end
-            end
+            task.wait(PredictionEnabled and PredictionSampleInterval or 0.25)
         end
     end)
 
@@ -2292,7 +2306,8 @@ do
             OldHook = hookmetamethod(game, "__namecall", function(self, V1, V2, ...)
                 local Method = (getnamecallmethod and getnamecallmethod():lower()) or ""
 
-                if tostring(self) == "RemoteEvent" and Method == "fireserver" then
+                -- FIXED: IsA check — tostring() returned the remote's NAME, not its class
+                if typeof(self) == "Instance" and self:IsA("RemoteEvent") and Method == "fireserver" then
                     if typeof(V1) == "Vector3" then
                         if SilentAimPlayersEnabled and PlayersPosition then
                             return OldHook(self, PlayersPosition, V2, ...)
@@ -2618,284 +2633,6 @@ do
 end
 
 -- ============================================================
---  MOBILE | QUICK ACTIONS v3 (smaller FAB, expands downward)
--- ============================================================
-do
-    if UserInputService.TouchEnabled then
-        local PanelGui = Instance.new("ScreenGui")
-        PanelGui.Name = "AlienQuickActions"
-        PanelGui.ResetOnSpawn = false
-        PanelGui.DisplayOrder = 998
-        local okRoot = pcall(function()
-            PanelGui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
-        end)
-        if not PanelGui.Parent then
-            PanelGui.Parent = player:WaitForChild("PlayerGui")
-        end
-
-        -- container TOP-anchored: grows DOWNWARD when expanded
-        local container = Instance.new("Frame")
-        container.Name = "Container"
-        container.AnchorPoint = Vector2.new(1, 0)
-        container.Position = UDim2.new(1, -14, 0.38, 0)
-        container.Size = UDim2.new(0, 48, 0, 48)
-        container.BackgroundTransparency = 1
-        container.Active = true
-        container.Parent = PanelGui
-
-        -- expanded background panel (sits BELOW the header)
-        local back = Instance.new("Frame")
-        back.Name = "Back"
-        back.Visible = false
-        back.Position = UDim2.new(0, 0, 0, 52)
-        back.Size = UDim2.new(0, 150, 0, 302)
-        back.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
-        back.BackgroundTransparency = 0.2
-        back.BorderSizePixel = 0
-        back.Parent = container
-        back.ZIndex = 2
-
-        local bc = Instance.new("UICorner")
-        bc.CornerRadius = UDim.new(0, 12)
-        bc.Parent = back
-        local bs = Instance.new("UIStroke")
-        bs.Color = Color3.fromRGB(0, 200, 255)
-        bs.Thickness = 1.5
-        bs.Transparency = 0.35
-        bs.Parent = back
-
-        local backPad = Instance.new("UIPadding")
-        backPad.PaddingTop = UDim.new(0, 6)
-        backPad.PaddingBottom = UDim.new(0, 6)
-        backPad.PaddingLeft = UDim.new(0, 5)
-        backPad.PaddingRight = UDim.new(0, 5)
-        backPad.Parent = back
-
-        local rlayout = Instance.new("UIListLayout")
-        rlayout.Padding = UDim.new(0, 5)
-        rlayout.SortOrder = Enum.SortOrder.LayoutOrder
-        rlayout.Parent = back
-
-        -- header/FAB at TOP of container
-        local fab = Instance.new("TextButton")
-        fab.Name = "FAB"
-        fab.Position = UDim2.new(0, 0, 0, 0)
-        fab.Size = UDim2.new(0, 48, 0, 48)
-        fab.BackgroundColor3 = Color3.fromRGB(0, 90, 120)
-        fab.BackgroundTransparency = 0.15
-        fab.Text = "⚡ 0"
-        fab.TextColor3 = Color3.fromRGB(220, 250, 255)
-        fab.TextSize = 15
-        fab.Font = Enum.Font.GothamBlack
-        fab.AutoButtonColor = false
-        fab.BorderSizePixel = 0
-        fab.Parent = container
-        fab.ZIndex = 3
-
-        local fc = Instance.new("UICorner")
-        fc.CornerRadius = UDim.new(1, 0)
-        fc.Parent = fab
-        local fs = Instance.new("UIStroke")
-        fs.Color = Color3.fromRGB(0, 255, 255)
-        fs.Thickness = 2
-        fs.Transparency = 0.25
-        fs.Parent = fab
-
-        local expanded = false
-
-        local function SetRayfieldFlag(flag, value)
-            pcall(function()
-                local el = Rayfield.Flags and Rayfield.Flags[flag]
-                if el and el.Set then
-                    el:Set(value)
-                end
-            end)
-        end
-
-        local function makeToggle(label, getter, setter, flag)
-            local b = Instance.new("TextButton")
-            b.Size = UDim2.new(1, 0, 0, 38)
-            b.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-            b.Text = label .. " · ?"
-            b.TextColor3 = Color3.fromRGB(255, 255, 255)
-            b.TextSize = 12
-            b.Font = Enum.Font.GothamBold
-            b.AutoButtonColor = false
-            b.BorderSizePixel = 0
-            b.Parent = back
-            b.ZIndex = 3
-            local bc = Instance.new("UICorner")
-            bc.CornerRadius = UDim.new(0, 8)
-            bc.Parent = b
-
-            local function refresh()
-                local on = getter()
-                b.Text = label .. " · " .. (on and "ON" or "OFF")
-                b.BackgroundColor3 = on and Color3.fromRGB(22, 120, 64) or Color3.fromRGB(95, 32, 32)
-            end
-
-            b.Activated:Connect(function()
-                setter(not getter())
-                refresh()
-            end)
-
-            refresh()
-            return b
-        end
-
-        local function updateHeaderText()
-            local active = 0
-            if Config.TweenToNearest or Config.TweenToPlayer then active = active + 1 end
-            if Config.FlaggedM1 then active = active + 1 end
-            if SilentAimModule.GetPlayers and SilentAimModule.GetPlayers() then active = active + 1 end
-            if Hub.PanicFleeEnabled then active = active + 1 end
-            if Config.FruitM1 then active = active + 1 end
-            if Hub.DragonGunEnabled then active = active + 1 end
-            if Hub.IsMobBringEnabled and Hub.IsMobBringEnabled() then active = active + 1 end
-            fab.Text = expanded and "✕" or ("⚡ " .. active)
-        end
-
-        -- ============ COMBAT TOGGLES ============
-        makeToggle("Pursue", function()
-            return Config.TweenToNearest
-        end, function(v)
-            Config.TweenToNearest = v
-            if v then
-                Config.TweenToPlayer = false
-                SetRayfieldFlag("TweenPlayer", false)
-                Hub.StartTween()
-            else
-                Hub.StopTween()
-            end
-            SetRayfieldFlag("TweenNearest", v)
-        end, "TweenNearest")
-
-        makeToggle("M1", function()
-            return Config.FlaggedM1
-        end, function(v)
-            Config.FlaggedM1 = v
-            SetRayfieldFlag("FlaggedM1", v)
-        end, "FlaggedM1")
-
-        makeToggle("Aim", function()
-            return SilentAimModule.GetPlayers and SilentAimModule.GetPlayers() or false
-        end, function(v)
-            SilentAimModule:SetPlayers(v)
-        end, "SAPlayers")
-
-        makeToggle("Flee", function()
-            return Hub.PanicFleeEnabled
-        end, function(v)
-            Hub.PanicFleeEnabled = v
-            SetRayfieldFlag("PanicFlee", v)
-        end, "PanicFlee")
-
-        makeToggle("Aura", function()
-            return Config.FruitM1
-        end, function(v)
-            Config.FruitM1 = v
-            SetRayfieldFlag("FruitM1", v)
-        end, "FruitM1")
-
-        makeToggle("Gun", function()
-            return Hub.DragonGunEnabled
-        end, function(v)
-            Hub.DragonGunEnabled = v
-            SetRayfieldFlag("DragonGunM1", v)
-        end, "DragonGunM1")
-
-        makeToggle("Bring", function()
-            return Hub.IsMobBringEnabled and Hub.IsMobBringEnabled() or false
-        end, function(v)
-            if v then Hub.StartMobBring() else Hub.StopMobBring() end
-        end, "BringNPC")
-
-        -- expand / collapse (container grows DOWNWARD, top edge stays fixed)
-        local function SetExpanded(state)
-            expanded = state
-            back.Visible = state
-            if state then
-                container.Size = UDim2.new(0, 150, 0, 354)
-                fab.Size = UDim2.new(1, 0, 0, 48)
-            else
-                container.Size = UDim2.new(0, 48, 0, 48)
-                fab.Size = UDim2.new(0, 48, 0, 48)
-            end
-            updateHeaderText()
-        end
-
-        -- header: tap = toggle, hold-drag = move (6px threshold)
-        local dragging = false
-        local moved = false
-        local dragStart, startPos
-        fab.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch
-            or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                moved = false
-                dragStart = input.Position
-                startPos = container.Position
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        dragging = false
-                    end
-                end)
-            end
-        end)
-        UserInputService.InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.Touch
-            or input.UserInputType == Enum.UserInputType.MouseMovement) then
-                local delta = input.Position - dragStart
-                if delta.Magnitude > 6 then
-                    moved = true
-                end
-                if moved then
-                    container.Position = UDim2.new(
-                        startPos.X.Scale, startPos.X.Offset + delta.X,
-                        startPos.Y.Scale, startPos.Y.Offset + delta.Y
-                    )
-                end
-            end
-        end)
-        fab.Activated:Connect(function()
-            if not moved then
-                SetExpanded(not expanded)
-            end
-        end)
-
-        -- tap outside closes
-        UserInputService.InputBegan:Connect(function(input, gp)
-            if not expanded then return end
-            if input.UserInputType ~= Enum.UserInputType.Touch
-            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-                return
-            end
-            local pos = input.Position
-            local inset = game:GetService("GuiService"):GetGuiInset()
-            local absPos = container.AbsolutePosition
-            local absSize = container.AbsoluteSize
-            local withinX = pos.X >= absPos.X and pos.X <= absPos.X + absSize.X
-            local withinY = pos.Y >= absPos.Y + inset.Y and pos.Y <= absPos.Y + inset.Y + absSize.Y
-            if not (withinX and withinY) then
-                SetExpanded(false)
-            end
-        end)
-
-        -- badge refresh
-        task.spawn(function()
-            while true do
-                task.wait(2)
-                if not expanded then
-                    updateHeaderText()
-                end
-            end
-        end)
-
-        updateHeaderText()
-    end
-end
-
--- ============================================================
 --  FPS BOOST
 -- ============================================================
 function Hub.ApplyFPSBoost()
@@ -2954,15 +2691,16 @@ function Hub.ApplyFPSBoost()
 end
 
 -- ============================================================
---  CONFIG PERSISTENCE (custom — settings + player list survive)
+--  CONFIG PERSISTENCE v2 (diagnostics + visible failures)
 -- ============================================================
 do
     local SAVE_FILE = "AlienHub_Settings.json"
+    local LastSaveError = nil
 
     local CONFIG_KEYS = {"Fly","AutoHaki","AutoV4","FlaggedM1","FruitM1","TweenToPlayer","TweenToNearest","ESP","NoClip","AntiStun","IceWater"}
 
     local HUB_KEYS = {
-        "TweenSpeedVal","TeamCheckEnabled","MinTargetLevel","InstaSnapDistance","TweenRecalcThreshold","TweenMaxRange",
+        "TweenSpeedVal","TeamCheckEnabled","MinTargetLevel","PursuitMaxRange","InstaSnapDistance","TweenRecalcThreshold","TweenMaxRange",
         "TweenXOffset","TweenYOffset","TweenZOffset","FlaggedRange","FruitM1Range","DragonGunRange",
         "MobBringRange","MobBringHold","OrbitRadius","OrbitSpeed","DashLengthValue",
         "PanicFleeThreshold","PanicFleeResetHealth","HitboxSize","HitboxTransparency",
@@ -2976,6 +2714,7 @@ do
         TweenToPlayer = "TweenPlayer", TweenToNearest = "TweenNearest",
         ESP = "ESP", NoClip = "NoClipToggle", AntiStun = "AntiStunToggle", IceWater = "IceWaterToggle",
         TweenSpeedVal = "TweenSpeed", TeamCheckEnabled = "TeamCheck", MinTargetLevel = "MinTargetLevel",
+        PursuitMaxRange = "PursuitMaxRange",
         InstaSnapDistance = "InstaSnap", TweenXOffset = "TweenXOff", TweenYOffset = "TweenYOff", TweenZOffset = "TweenZOff",
         FlaggedRange = "FlaggedRange", FruitM1Range = "FruitRange", DragonGunRange = "DragonGunRange",
         MobBringRange = "BringRange", MobBringHold = "BringHold", OrbitRadius = "OrbitRadius", OrbitSpeed = "OrbitSpeed",
@@ -2991,7 +2730,7 @@ do
 
     function Hub.SaveHubConfig(silent)
         local ok, err = pcall(function()
-            if not writefile then error("no writefile") end
+            if not writefile then error("writefile missing on this executor") end
             local data = { config = {}, hub = {}, list = {} }
             for _, k in ipairs(CONFIG_KEYS) do
                 data.config[k] = Config[k]
@@ -3006,11 +2745,12 @@ do
             end
             writefile(SAVE_FILE, HttpService:JSONEncode(data))
         end)
+        LastSaveError = ok and nil or tostring(err)
         if not silent then
             if ok then
                 Notify("Config", "Settings saved", 2)
             else
-                Notify("Config", "Save failed — executor lacks writefile", 3)
+                Notify("Config", "SAVE FAILED: " .. LastSaveError, 5)
             end
         end
         return ok
@@ -3018,10 +2758,15 @@ do
 
     function Hub.LoadHubConfig()
         local ok, data = pcall(function()
-            if not readfile or not isfile or not isfile(SAVE_FILE) then return nil end
-            return HttpService:JSONDecode(readfile(SAVE_FILE))
+            if not readfile or not isfile then return nil, "readfile/isfile missing" end
+            if not isfile(SAVE_FILE) then return nil, "no save file" end
+            return HttpService:JSONDecode(readfile(SAVE_FILE)), nil
         end)
-        if not ok or type(data) ~= "table" then return false end
+        local loadErr = select(2, ok, data)
+        if not ok or type(data) ~= "table" then
+            if loadErr then LastSaveError = "load: " .. tostring(loadErr) end
+            return false
+        end
 
         pcall(function()
             if data.config then
@@ -3044,7 +2789,6 @@ do
             end
         end)
 
-        -- sync hub UI visuals to loaded values
         pcall(function()
             local function syncFlag(key, value)
                 local flag = FLAG_MAP[key]
@@ -3073,11 +2817,37 @@ do
         Notify("Config", "Saved settings erased — defaults on next load", 3)
     end
 
-    -- autosave every 30s
+    -- CONFIG STATUS: tells us exactly where the chain breaks
+    function Hub.ConfigStatus()
+        local lines = {}
+        lines[#lines + 1] = "writefile: " .. (writefile and "YES" or "NO")
+        lines[#lines + 1] = "readfile: " .. (readfile and "YES" or "NO")
+        lines[#lines + 1] = "isfile: " .. (isfile and "YES" or "NO")
+        local exists = false
+        pcall(function() exists = isfile and isfile(SAVE_FILE) or false end)
+        lines[#lines + 1] = "save file exists: " .. (exists and "YES" or "NO")
+        if exists then
+            pcall(function()
+                local content = readfile(SAVE_FILE)
+                lines[#lines + 1] = "file size: " .. #content .. " bytes"
+                local okDecode = pcall(function() HttpService:JSONDecode(content) end)
+                lines[#lines + 1] = "file valid JSON: " .. (okDecode and "YES" or "NO")
+            end)
+        end
+        lines[#lines + 1] = "last error: " .. (LastSaveError or "none")
+        Notify("Config Status", table.concat(lines, "\n"), 10)
+    end
+
+    -- autosave every 30s — ONE visible failure notice (not spam)
+    local autosaveFailNotified = false
     task.spawn(function()
         while true do
             task.wait(30)
-            Hub.SaveHubConfig(true)
+            local ok = Hub.SaveHubConfig(true)
+            if not ok and not autosaveFailNotified then
+                autosaveFailNotified = true
+                Notify("Config", "Autosave failing: " .. (LastSaveError or "unknown") .. " — check Config Status button", 6)
+            end
         end
     end)
 end
@@ -3126,6 +2896,13 @@ MainTab:CreateButton({
     Name = "Reset Saved Config",
     Callback = function()
         Hub.ResetHubConfig()
+    end
+})
+
+MainTab:CreateButton({
+    Name = "Config Status (diagnostics)",
+    Callback = function()
+        Hub.ConfigStatus()
     end
 })
 
@@ -3310,7 +3087,7 @@ CombatTab:CreateSlider({
     Range = {0, 2550},
     Increment = 50,
     Suffix = "",
-    CurrentValue = 2300,
+    CurrentValue = 0,
     Flag = "MinTargetLevel",
     Callback = function(Value)
         Hub.MinTargetLevel = Value
@@ -3478,6 +3255,18 @@ MovementTab:CreateSlider({
     Flag = "InstaSnap",
     Callback = function(Value)
         Hub.InstaSnapDistance = Value
+    end
+})
+
+MovementTab:CreateSlider({
+    Name = "Pursuit Max Range (skip far targets)",
+    Range = {100, 20000},
+    Increment = 100,
+    Suffix = "studs",
+    CurrentValue = 2500,
+    Flag = "PursuitMaxRange",
+    Callback = function(Value)
+        Hub.PursuitMaxRange = Value
     end
 })
 
@@ -4381,5 +4170,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.10.0 loaded — survival priority active", 3)
+    Notify("Alien Hub", "v3.10.2 loaded — config diagnostics ready", 3)
 end)
