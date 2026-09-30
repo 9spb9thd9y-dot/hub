@@ -1,29 +1,41 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.11.1 — multi-source rayfield loader)
+--  ALIEN HUB | Rayfield UI (v3.11.2 — single-execution loader)
 -- ============================================================
 
 -- ============================================================
---  RAYFIELD LOADER (fallback chain — no single point of failure)
+--  RAYFIELD LOADER v2 (execute exactly ONE source — no double-init)
 -- ============================================================
 local Rayfield
 do
     local rayfield_sources = {
         "https://raw.githubusercontent.com/9spb9thd9y-dot/hub/main/rayfield.lua", -- your mirror
-        "https://sirius.menu/rayfield",                                            -- original CDN
-        "https://raw.githubusercontent.com/shlexware/Rayfield/main/source",       -- official github
+        "https://sirius.menu/rayfield",
     }
     for _, url in ipairs(rayfield_sources) do
-        local ok, result = pcall(function()
-            return loadstring(game:HttpGet(url))()
-        end)
-        if ok and result then
-            Rayfield = result
-            print("[Alien Hub] Rayfield loaded from: " .. url)
-            break
+        local ok, src = pcall(game.HttpGet, game, url)
+        -- fetch must return real content (some executors return nil/HTML on 404 without erroring)
+        if ok and type(src) == "string" and #src > 1000 and src:find("Rayfield") then
+            local fn = loadstring(src)
+            if fn then
+                -- execute ONCE. a nil return is NOT a failure —
+                -- many rayfield builds create their UI but return nothing.
+                Rayfield = fn()
+                -- verify by result: either it returned the library, or it created its ScreenGui
+                local created = Rayfield
+                    or (game:GetService("CoreGui"):FindFirstChild("Rayfield"))
+                    or (player and player.Parent and player:WaitForChild("PlayerGui", 1):FindFirstChild("Rayfield"))
+                if created then
+                    print("[Alien Hub] Rayfield loaded from: " .. url)
+                    break -- SUCCESS — never execute a second source
+                end
+                -- nothing was created: this source genuinely failed, try next
+                warn("[Alien Hub] Source produced no UI: " .. url)
+            end
+        else
+            warn("[Alien Hub] Fetch failed: " .. url)
         end
-        warn("[Alien Hub] Rayfield source failed: " .. url)
     end
-    if not Rayfield then
+    if not Rayfield and not (game:GetService("CoreGui") and game:GetService("CoreGui"):FindFirstChild("Rayfield")) then
         warn("[Alien Hub] All Rayfield sources failed — cannot load")
         return
     end
@@ -140,7 +152,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.11.1 | initializing modules...",
+    LoadingSubtitle = "v3.11.2 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -3867,7 +3879,7 @@ do
 end
 
 -- ============================================================
---  UI | SERVER TAB (v3.11.1 — browser-remote bounty hopper)
+--  UI | SERVER TAB (browser-remote bounty hopper)
 -- ============================================================
 do
     -- ============ HOPPER STATE ============
@@ -4247,5 +4259,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.11.1 loaded — resilient rayfield loader", 3)
+    Notify("Alien Hub", "v3.11.2 loaded — single-exec loader", 3)
 end)
