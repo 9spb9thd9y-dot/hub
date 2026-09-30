@@ -1,7 +1,33 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.11.0 — browser-remote bounty hopper)
+--  ALIEN HUB | Rayfield UI (v3.11.1 — multi-source rayfield loader)
 -- ============================================================
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- ============================================================
+--  RAYFIELD LOADER (fallback chain — no single point of failure)
+-- ============================================================
+local Rayfield
+do
+    local rayfield_sources = {
+        "https://raw.githubusercontent.com/9spb9thd9y-dot/hub/main/rayfield.lua", -- your mirror
+        "https://sirius.menu/rayfield",                                            -- original CDN
+        "https://raw.githubusercontent.com/shlexware/Rayfield/main/source",       -- official github
+    }
+    for _, url in ipairs(rayfield_sources) do
+        local ok, result = pcall(function()
+            return loadstring(game:HttpGet(url))()
+        end)
+        if ok and result then
+            Rayfield = result
+            print("[Alien Hub] Rayfield loaded from: " .. url)
+            break
+        end
+        warn("[Alien Hub] Rayfield source failed: " .. url)
+    end
+    if not Rayfield then
+        warn("[Alien Hub] All Rayfield sources failed — cannot load")
+        return
+    end
+end
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -114,7 +140,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.11.0 | initializing modules...",
+    LoadingSubtitle = "v3.11.1 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -3841,7 +3867,7 @@ do
 end
 
 -- ============================================================
---  UI | SERVER TAB (v3.11.0 — browser-remote bounty hopper)
+--  UI | SERVER TAB (v3.11.1 — browser-remote bounty hopper)
 -- ============================================================
 do
     -- ============ HOPPER STATE ============
@@ -4221,5 +4247,5 @@ task.spawn(function()
         Hub.StartFly()
     end
     pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.11.0 loaded — browser hopper active", 3)
+    Notify("Alien Hub", "v3.11.1 loaded — resilient rayfield loader", 3)
 end)
