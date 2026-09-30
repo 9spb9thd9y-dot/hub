@@ -1,5 +1,5 @@
 -- ============================================================
---  ALIEN HUB | Rayfield UI (v3.11.2 — single-execution loader)
+--  ALIEN HUB | Rayfield UI (v3.12.0 — vararg hook fix)
 -- ============================================================
 
 -- ============================================================
@@ -23,7 +23,6 @@ do
                 -- verify by result: either it returned the library, or it created its ScreenGui
                 local created = Rayfield
                     or (game:GetService("CoreGui"):FindFirstChild("Rayfield"))
-                    or (player and player.Parent and player:WaitForChild("PlayerGui", 1):FindFirstChild("Rayfield"))
                 if created then
                     print("[Alien Hub] Rayfield loaded from: " .. url)
                     break -- SUCCESS — never execute a second source
@@ -152,7 +151,7 @@ end
 local Window = Rayfield:CreateWindow({
     Name = "Alien Hub",
     LoadingTitle = "Alien Hub",
-    LoadingSubtitle = "v3.11.2 | initializing modules...",
+    LoadingSubtitle = "v3.12.0 | initializing modules...",
     ConfigurationSaving = {
         Enabled = false,
         FolderName = "AlienHub",
@@ -1906,7 +1905,7 @@ do
 end
 
 -- ============================================================
---  SILENT AIM + PREDICTION (guarded re-entrant hook)
+--  SILENT AIM + PREDICTION (v3.12.0 — varargs captured, compiles clean)
 -- ============================================================
 local SilentAimModule = {}
 
@@ -2276,6 +2275,10 @@ do
             OldHook = hookmetamethod(game, "__namecall", function(self, V1, V2, ...)
                 local Method = (getnamecallmethod and getnamecallmethod():lower()) or ""
 
+                -- capture varargs ONCE in a real table (inner functions can't use ...)
+                local args = table.pack(V1, V2, ...)
+                local argn = args.n
+
                 -- re-entrancy guard: never process our own nested calls
                 if hookDepth > 0 then
                     return OldHook(self, V1, V2, ...)
@@ -2286,50 +2289,52 @@ do
                 local hookOk, hookErr = pcall(function()
                     -- FIXED: IsA check — tostring() returned the remote's NAME, not its class
                     if typeof(self) == "Instance" and self:IsA("RemoteEvent") and Method == "fireserver" then
-                        if typeof(V1) == "Vector3" then
+                        if typeof(args[1]) == "Vector3" then
                             if SilentAimPlayersEnabled and PlayersPosition then
-                                result = table.pack(OldHook(self, PlayersPosition, V2, ...))
+                                result = table.pack(OldHook(self, PlayersPosition, table.unpack(args, 2, argn)))
                                 return
                             elseif SilentAimNPCsEnabled and NPCPosition then
-                                result = table.pack(OldHook(self, NPCPosition, V2, ...))
+                                result = table.pack(OldHook(self, NPCPosition, table.unpack(args, 2, argn)))
                                 return
                             end
                         end
-                        if type(V1) == "string" and table.find(Booms, V1) then
+                        if type(args[1]) == "string" and table.find(Booms, args[1]) then
                             if ZSkillorM1 then
                                 if SilentAimPlayersEnabled and PlayersPosition then
-                                    result = table.pack(OldHook(self, V1, PlayersPosition, nil, ...))
+                                    result = table.pack(OldHook(self, args[1], PlayersPosition, table.unpack(args, 3, argn)))
                                     return
                                 elseif SilentAimNPCsEnabled and NPCPosition then
-                                    result = table.pack(OldHook(self, V1, NPCPosition, nil, ...))
+                                    result = table.pack(OldHook(self, args[1], NPCPosition, table.unpack(args, 3, argn)))
                                     return
                                 end
                             end
                         end
                     elseif Method == "invokeserver" then
                         if isValidCondition() then
-                            if type(V1) == "string" and table.find(Skills, V1) then
+                            if type(args[1]) == "string" and table.find(Skills, args[1]) then
                                 if SilentAimPlayersEnabled and PlayersPosition then
-                                    result = table.pack(OldHook(self, V1, PlayersPosition, nil, ...))
+                                    result = table.pack(OldHook(self, args[1], PlayersPosition, table.unpack(args, 2, argn)))
                                     return
                                 elseif SilentAimNPCsEnabled and NPCPosition then
-                                    result = table.pack(OldHook(self, V1, NPCPosition, nil, ...))
+                                    result = table.pack(OldHook(self, args[1], NPCPosition, table.unpack(args, 2, argn)))
                                     return
                                 end
                             end
                         end
                     end
-                    -- no rewrite: pass through
-                    result = table.pack(OldHook(self, V1, V2, ...))
+                    -- no rewrite: pass through with original args
+                    result = table.pack(OldHook(self, table.unpack(args, 1, argn)))
                 end)
 
                 hookDepth = hookDepth - 1
 
                 if not hookOk then
                     -- hook logic faulted — fall through to the original call untouched
-                    return OldHook(self, V1, V2, ...)
+                    return OldHook(self, table.unpack(args, 1, argn))
                 end
-                return table.unpack(result and result or {})
+                if result then
+                    return table.unpack(result, 1, result.n)
+                end
             end)
             setreadonly(hookMeta, true)
         end
@@ -4232,32 +4237,4 @@ task.spawn(function()
     task.wait(0.3)
     Hub.LoadHubConfig()
     task.wait(0.3)
-    -- deferred flag sync: Rayfield is now fully built, safe to :Set()
-    pcall(function()
-        local FLAG_SYNC = {
-            Fly = "Fly", AutoHaki = "AutoHaki", AutoV4 = "AutoV4",
-            FlaggedM1 = "FlaggedM1", FruitM1 = "FruitM1",
-            TweenToPlayer = "TweenPlayer", TweenToNearest = "TweenNearest",
-            ESP = "ESP", NoClip = "NoClipToggle", AntiStun = "AntiStunToggle", IceWater = "IceWaterToggle",
-            TweenSpeedVal = "TweenSpeed", TeamCheckEnabled = "TeamCheck", MinTargetLevel = "MinTargetLevel",
-            PursuitMaxRange = "PursuitMaxRange",
-            InstaSnapDistance = "InstaSnap", TweenXOffset = "TweenXOff", TweenYOffset = "TweenYOff", TweenZOffset = "TweenZOff",
-            FlaggedRange = "FlaggedRange", FruitM1Range = "FruitRange", DragonGunRange = "DragonGunRange",
-            MobBringRange = "BringRange", MobBringHold = "BringHold", OrbitRadius = "OrbitRadius", OrbitSpeed = "OrbitSpeed",
-            DashLengthValue = "DashLengthVal", HitboxSize = "HitboxSize", HitboxTransparency = "HitboxTransparency",
-            BountyMinBounty = "BountyMinBounty", BountyMaxPages = "BountyPages"
-        }
-        for key, flag in pairs(FLAG_SYNC) do
-            local value = Config[key] or Hub[key]
-            local el = Rayfield.Flags and Rayfield.Flags[flag]
-            if value ~= nil and el and el.Set then
-                pcall(function() el:Set(value) end)
-            end
-        end
-    end)
-    if Config.Fly then
-        Hub.StartFly()
-    end
-    pcall(function() player.CameraMaxZoomDistance = 128 end)
-    Notify("Alien Hub", "v3.11.2 loaded — single-exec loader", 3)
-end)
+    -- deferred flag sync: Ray
