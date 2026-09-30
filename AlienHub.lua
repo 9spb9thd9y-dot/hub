@@ -40,6 +40,11 @@ do
     end
 end
 
+if not Rayfield then
+    warn("[Alien Hub] Rayfield returned nil (GUI exists but no library handle) - cannot continue")
+    return
+end
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -2719,12 +2724,14 @@ do
         DashLengthValue = "DashLengthVal", HitboxSize = "HitboxSize", HitboxTransparency = "HitboxTransparency",
         BountyMinBounty = "BountyMinBounty", BountyMaxPages = "BountyPages"
     }
+    Hub.FlagMap = FLAG_MAP
 
     local LIST_MODE_LABELS = {
         Off = "Off",
         Blacklist = "Blacklist (never target listed)",
         Whitelist = "Whitelist (only target listed)"
     }
+    Hub.ListModeLabels = LIST_MODE_LABELS
 
     function Hub.SaveHubConfig(silent)
         local ok, err = pcall(function()
@@ -2756,13 +2763,15 @@ do
 
     function Hub.LoadHubConfig()
         local ok, data = pcall(function()
-            if not readfile or not isfile then return nil, "readfile/isfile missing" end
-            if not isfile(SAVE_FILE) then return nil, "no save file" end
-            return HttpService:JSONDecode(readfile(SAVE_FILE)), nil
+            if not readfile or not isfile then error("readfile/isfile missing") end
+            if not isfile(SAVE_FILE) then error("no save file") end
+            return HttpService:JSONDecode(readfile(SAVE_FILE))
         end)
-        local loadErr = select(2, ok, data)
         if not ok or type(data) ~= "table" then
-            if loadErr then LastSaveError = "load: " .. tostring(loadErr) end
+            -- "no save file" on first run is normal; only record real errors
+            if not tostring(data):find("no save file", 1, true) then
+                LastSaveError = "load: " .. tostring(data)
+            end
             return false
         end
 
@@ -4237,4 +4246,33 @@ task.spawn(function()
     task.wait(0.3)
     Hub.LoadHubConfig()
     task.wait(0.3)
-    -- deferred flag sync: Ray
+
+    -- deferred flag sync: push loaded values into the built UI.
+    -- Pursuit toggles are skipped so the hub never auto-starts chasing on load.
+    local skip = { TweenToPlayer = true, TweenToNearest = true }
+    for key, flagName in pairs(Hub.FlagMap or {}) do
+        if not skip[key] then
+            local flag = Rayfield.Flags and Rayfield.Flags[flagName]
+            local v = Config[key]
+            if v == nil then v = Hub[key] end
+            if flag and v ~= nil then
+                pcall(function() flag:Set(v) end)
+            end
+        end
+    end
+
+    -- restore list-mode dropdown (stored as "Off"/"Blacklist"/"Whitelist")
+    pcall(function()
+        local flag = Rayfield.Flags and Rayfield.Flags.ListMode
+        local label = Hub.ListModeLabels and Hub.ListModeLabels[Hub.ListMode]
+        if flag and label then flag:Set({label}) end
+    end)
+
+    -- (re)start fly cleanly so it never gets two render connections
+    if Config.Fly then
+        pcall(Hub.StopFly)
+        pcall(Hub.StartFly)
+    end
+
+    Notify("Alien Hub", "v3.12.0 loaded", 3)
+end)
